@@ -940,9 +940,17 @@ PrefabInstance:
       propertyPath: m_Name
       value: RoomListItem_02
       objectReference: {fileID: 0}
+    - target: {fileID: 6648996863194541610, guid: db5a5ce29b5514f43bba37bf2c81f8ac, type: 3}
+      propertyPath: m_Sprite
+      value: 
+      objectReference: {fileID: 21300000, guid: 72c72df40bd317b44ab2c02d03f268c7, type: 3}
+    - target: {fileID: 1661628422766863149, guid: db5a5ce29b5514f43bba37bf2c81f8ac, type: 3}
+      propertyPath: m_Interactable
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 4723607190701870330, guid: db5a5ce29b5514f43bba37bf2c81f8ac, type: 3}
       propertyPath: m_text
-      value: 3/6
+      value: 6/6
       objectReference: {fileID: 0}
     - target: {fileID: 4723607190701870330, guid: db5a5ce29b5514f43bba37bf2c81f8ac, type: 3}
       propertyPath: m_sharedMaterial
@@ -1154,9 +1162,17 @@ PrefabInstance:
       propertyPath: m_Name
       value: RoomListItem_07
       objectReference: {fileID: 0}
+    - target: {fileID: 6648996863194541610, guid: db5a5ce29b5514f43bba37bf2c81f8ac, type: 3}
+      propertyPath: m_Sprite
+      value: 
+      objectReference: {fileID: 21300000, guid: 72c72df40bd317b44ab2c02d03f268c7, type: 3}
+    - target: {fileID: 1661628422766863149, guid: db5a5ce29b5514f43bba37bf2c81f8ac, type: 3}
+      propertyPath: m_Interactable
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 4723607190701870330, guid: db5a5ce29b5514f43bba37bf2c81f8ac, type: 3}
       propertyPath: m_text
-      value: 3/4
+      value: 4/4
       objectReference: {fileID: 0}
     - target: {fileID: 4723607190701870330, guid: db5a5ce29b5514f43bba37bf2c81f8ac, type: 3}
       propertyPath: m_sharedMaterial
@@ -2091,9 +2107,17 @@ PrefabInstance:
       propertyPath: m_Name
       value: RoomListItem_05
       objectReference: {fileID: 0}
+    - target: {fileID: 6648996863194541610, guid: db5a5ce29b5514f43bba37bf2c81f8ac, type: 3}
+      propertyPath: m_Sprite
+      value: 
+      objectReference: {fileID: 21300000, guid: 72c72df40bd317b44ab2c02d03f268c7, type: 3}
+    - target: {fileID: 1661628422766863149, guid: db5a5ce29b5514f43bba37bf2c81f8ac, type: 3}
+      propertyPath: m_Interactable
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 4723607190701870330, guid: db5a5ce29b5514f43bba37bf2c81f8ac, type: 3}
       propertyPath: m_text
-      value: 2/6
+      value: 8/8
       objectReference: {fileID: 0}
     - target: {fileID: 4723607190701870330, guid: db5a5ce29b5514f43bba37bf2c81f8ac, type: 3}
       propertyPath: m_sharedMaterial
