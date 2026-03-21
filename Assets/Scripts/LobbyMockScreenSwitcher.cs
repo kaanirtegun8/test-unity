@@ -5,7 +5,9 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
 {
     [SerializeField] private GameObject roomBrowserScreen;
     [SerializeField] private GameObject createRoomScreen;
+    [SerializeField] private GameObject currentRoomScreen;
     [SerializeField] private Button createRoomButton;
+    [SerializeField] private Button createButton;
     [SerializeField] private Button backButton;
 
     private void Awake()
@@ -33,6 +35,12 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
             backButton.onClick.RemoveListener(ShowRoomBrowser);
             backButton.onClick.AddListener(ShowRoomBrowser);
         }
+
+        if (createButton != null)
+        {
+            createButton.onClick.RemoveListener(ShowCurrentRoom);
+            createButton.onClick.AddListener(ShowCurrentRoom);
+        }
     }
 
     private void UnbindButtons()
@@ -45,6 +53,11 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
         if (backButton != null)
         {
             backButton.onClick.RemoveListener(ShowRoomBrowser);
+        }
+
+        if (createButton != null)
+        {
+            createButton.onClick.RemoveListener(ShowCurrentRoom);
         }
     }
 
@@ -62,12 +75,26 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
             createRoomScreen = FindGameObjectByName(allTransforms, "CreateRoomScreen");
         }
 
+        if (currentRoomScreen == null)
+        {
+            currentRoomScreen = FindGameObjectByName(allTransforms, "CurrentRoomScreen");
+        }
+
         if (createRoomButton == null)
         {
             GameObject createButtonObject = FindGameObjectByName(allTransforms, "CreateRoomButton");
             if (createButtonObject != null)
             {
                 createRoomButton = createButtonObject.GetComponent<Button>();
+            }
+        }
+
+        if (createButton == null)
+        {
+            GameObject createActionButtonObject = FindGameObjectByName(allTransforms, "CreateButton");
+            if (createActionButtonObject != null)
+            {
+                createButton = createActionButtonObject.GetComponent<Button>();
             }
         }
 
@@ -105,6 +132,11 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
         {
             createRoomScreen.SetActive(true);
         }
+
+        if (currentRoomScreen != null)
+        {
+            currentRoomScreen.SetActive(false);
+        }
     }
 
     public void ShowRoomBrowser()
@@ -117,6 +149,29 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
         if (roomBrowserScreen != null)
         {
             roomBrowserScreen.SetActive(true);
+        }
+
+        if (currentRoomScreen != null)
+        {
+            currentRoomScreen.SetActive(false);
+        }
+    }
+
+    public void ShowCurrentRoom()
+    {
+        if (createRoomScreen != null)
+        {
+            createRoomScreen.SetActive(false);
+        }
+
+        if (roomBrowserScreen != null)
+        {
+            roomBrowserScreen.SetActive(false);
+        }
+
+        if (currentRoomScreen != null)
+        {
+            currentRoomScreen.SetActive(true);
         }
     }
 }
