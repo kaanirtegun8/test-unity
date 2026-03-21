@@ -9,6 +9,7 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
     [SerializeField] private Button createRoomButton;
     [SerializeField] private Button createButton;
     [SerializeField] private Button backButton;
+    [SerializeField] private Button leaveButton;
 
     private void Awake()
     {
@@ -41,6 +42,12 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
             createButton.onClick.RemoveListener(ShowCurrentRoom);
             createButton.onClick.AddListener(ShowCurrentRoom);
         }
+
+        if (leaveButton != null)
+        {
+            leaveButton.onClick.RemoveListener(ShowRoomBrowser);
+            leaveButton.onClick.AddListener(ShowRoomBrowser);
+        }
     }
 
     private void UnbindButtons()
@@ -58,6 +65,11 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
         if (createButton != null)
         {
             createButton.onClick.RemoveListener(ShowCurrentRoom);
+        }
+
+        if (leaveButton != null)
+        {
+            leaveButton.onClick.RemoveListener(ShowRoomBrowser);
         }
     }
 
@@ -104,6 +116,15 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
             if (backButtonObject != null)
             {
                 backButton = backButtonObject.GetComponent<Button>();
+            }
+        }
+
+        if (leaveButton == null)
+        {
+            GameObject leaveButtonObject = FindGameObjectByName(allTransforms, "LeaveButton");
+            if (leaveButtonObject != null)
+            {
+                leaveButton = leaveButtonObject.GetComponent<Button>();
             }
         }
     }
