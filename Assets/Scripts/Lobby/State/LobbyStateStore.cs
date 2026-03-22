@@ -77,6 +77,34 @@ public class LobbyStateStore
         CurrentRoom = room;
     }
 
+    public bool ApplyMappedCurrentRoom(RoomState room, bool upsertToRooms = true)
+    {
+        if (room == null)
+        {
+            return false;
+        }
+
+        string safeRoomId = room.roomId != null ? room.roomId.Trim() : string.Empty;
+        if (string.IsNullOrWhiteSpace(safeRoomId))
+        {
+            return false;
+        }
+
+        room.roomId = safeRoomId;
+        if (room.players == null)
+        {
+            room.players = new List<PlayerState>();
+        }
+
+        CurrentRoom = room;
+        if (upsertToRooms)
+        {
+            UpsertRoom(room);
+        }
+
+        return true;
+    }
+
     public void LeaveCurrentRoomAsLocalPlayer()
     {
         RoomState room = CurrentRoom;
@@ -262,6 +290,32 @@ public class LobbyStateStore
         }
 
         return DateTime.UtcNow.Ticks.ToString().Substring(0, 6);
+    }
+
+    private void UpsertRoom(RoomState room)
+    {
+        if (Rooms == null || room == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < Rooms.Count; i++)
+        {
+            RoomState existing = Rooms[i];
+            if (existing == null)
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(existing.roomId) &&
+                string.Equals(existing.roomId, room.roomId, StringComparison.Ordinal))
+            {
+                Rooms[i] = room;
+                return;
+            }
+        }
+
+        Rooms.Add(room);
     }
 
     private static int ClampInt(int value, int min, int max)

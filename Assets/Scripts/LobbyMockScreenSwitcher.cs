@@ -235,8 +235,11 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
                     Lobby createdLobby = await TryCreateLobbyFromDraftAsync(draft);
                     if (createdLobby != null)
                     {
-                        ApplyCreatedLobbyToStore(store, createdLobby);
-                        shouldOpenCurrentRoomScreen = true;
+                        shouldOpenCurrentRoomScreen = ApplyCreatedLobbyToStore(store, createdLobby);
+                        if (!shouldOpenCurrentRoomScreen)
+                        {
+                            Debug.LogWarning("LobbyMockScreenSwitcher: Create mapping failed safely. CurrentRoomScreen will not open.");
+                        }
                     }
                     else
                     {
@@ -257,6 +260,12 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
 
         if (!shouldOpenCurrentRoomScreen)
         {
+            return;
+        }
+
+        if (store.CurrentRoom == null)
+        {
+            Debug.LogWarning("LobbyMockScreenSwitcher: CurrentRoom is null after create flow. Screen transition skipped safely.");
             return;
         }
 
@@ -310,11 +319,11 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
         }
     }
 
-    private void ApplyCreatedLobbyToStore(LobbyStateStore store, Lobby createdLobby)
+    private bool ApplyCreatedLobbyToStore(LobbyStateStore store, Lobby createdLobby)
     {
         if (store == null || createdLobby == null)
         {
-            return;
+            return false;
         }
 
         if (unityLobbyService == null)
@@ -325,7 +334,7 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
         RoomState mappedRoom = unityLobbyService.MapLobbyToRoomState(createdLobby, false);
         if (mappedRoom == null)
         {
-            return;
+            return false;
         }
 
         // Create response may rarely omit player list; keep local creator visible safely.
@@ -346,35 +355,7 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
             });
         }
 
-        store.SetCurrentRoom(mappedRoom);
-        UpsertRoom(store.Rooms, mappedRoom);
-    }
-
-    private static void UpsertRoom(List<RoomState> rooms, RoomState room)
-    {
-        if (rooms == null || room == null)
-        {
-            return;
-        }
-
-        for (int i = 0; i < rooms.Count; i++)
-        {
-            RoomState existing = rooms[i];
-            if (existing == null)
-            {
-                continue;
-            }
-
-            if (!string.IsNullOrWhiteSpace(existing.roomId) &&
-                !string.IsNullOrWhiteSpace(room.roomId) &&
-                existing.roomId == room.roomId)
-            {
-                rooms[i] = room;
-                return;
-            }
-        }
-
-        rooms.Add(room);
+        return store.ApplyMappedCurrentRoom(mappedRoom, true);
     }
 
     private async void OnLeaveButtonClicked()

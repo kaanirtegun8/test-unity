@@ -293,12 +293,17 @@ public class RoomBrowserScreenBinder : MonoBehaviour
         isAuthRetryScheduled = false;
     }
 
-    private static List<RoomState> ConvertLobbiesToRoomStates(IReadOnlyList<Lobby> lobbies)
+    private List<RoomState> ConvertLobbiesToRoomStates(IReadOnlyList<Lobby> lobbies)
     {
         List<RoomState> result = new List<RoomState>();
         if (lobbies == null)
         {
             return result;
+        }
+
+        if (lobbyService == null)
+        {
+            lobbyService = new UnityLobbyService();
         }
 
         for (int i = 0; i < lobbies.Count; i++)
@@ -309,33 +314,11 @@ public class RoomBrowserScreenBinder : MonoBehaviour
                 continue;
             }
 
-            int safeMaxPlayers = Mathf.Max(1, lobby.MaxPlayers);
-            List<PlayerState> players = ConvertLobbyPlayers(lobby);
-            int fallbackPlayerCount = Mathf.Clamp(safeMaxPlayers - lobby.AvailableSlots, 0, safeMaxPlayers);
-            if (players.Count == 0 && fallbackPlayerCount > 0)
+            RoomState mappedRoom = lobbyService.MapLobbyToRoomState(lobby, true);
+            if (mappedRoom != null)
             {
-                for (int playerIndex = 0; playerIndex < fallbackPlayerCount; playerIndex++)
-                {
-                    players.Add(new PlayerState());
-                }
+                result.Add(mappedRoom);
             }
-
-            string roomNameFromData = GetLobbyDataValue(lobby, LobbyDataKeyRoomName);
-            string safeLobbyName = !string.IsNullOrWhiteSpace(lobby.Name) ? lobby.Name : roomNameFromData;
-            string safeLobbyId = !string.IsNullOrWhiteSpace(lobby.Id) ? lobby.Id : lobby.LobbyCode;
-            int treasureCount = ParseLobbyDataInt(lobby, LobbyDataKeyTreasureCount, 0);
-            int selectedMapIndex = ParseLobbyDataInt(lobby, LobbyDataKeySelectedMapIndex, 0);
-
-            result.Add(new RoomState
-            {
-                roomId = string.IsNullOrWhiteSpace(safeLobbyId) ? "000000" : safeLobbyId,
-                roomName = string.IsNullOrWhiteSpace(safeLobbyName) ? "Fun Match" : safeLobbyName,
-                isPublic = !lobby.IsPrivate,
-                maxPlayers = safeMaxPlayers,
-                selectedMapIndex = Mathf.Max(0, selectedMapIndex),
-                treasureCount = Mathf.Max(0, treasureCount),
-                players = players
-            });
         }
 
         return result;
@@ -427,39 +410,6 @@ public class RoomBrowserScreenBinder : MonoBehaviour
 
             return null;
         }
-    }
-
-    private void UpsertRoomById(RoomState room)
-    {
-        if (room == null || SharedStore.Rooms == null)
-        {
-            return;
-        }
-
-        string safeRoomId = room.roomId != null ? room.roomId.Trim() : string.Empty;
-        if (string.IsNullOrWhiteSpace(safeRoomId))
-        {
-            SharedStore.Rooms.Add(room);
-            return;
-        }
-
-        for (int i = 0; i < SharedStore.Rooms.Count; i++)
-        {
-            RoomState existingRoom = SharedStore.Rooms[i];
-            if (existingRoom == null)
-            {
-                continue;
-            }
-
-            string existingId = existingRoom.roomId != null ? existingRoom.roomId.Trim() : string.Empty;
-            if (string.Equals(existingId, safeRoomId, StringComparison.Ordinal))
-            {
-                SharedStore.Rooms[i] = room;
-                return;
-            }
-        }
-
-        SharedStore.Rooms.Add(room);
     }
 
     private static int ParseLobbyDataInt(Lobby lobby, string key, int fallback)
@@ -677,9 +627,7 @@ public class RoomBrowserScreenBinder : MonoBehaviour
             }
 
             targetRoom = mappedRoom;
-            UpsertRoomById(targetRoom);
-            SharedStore.SetCurrentRoom(targetRoom);
-            joinedOrAlreadyMember = true;
+            joinedOrAlreadyMember = SharedStore.ApplyMappedCurrentRoom(targetRoom, true);
         }
         else
         {
