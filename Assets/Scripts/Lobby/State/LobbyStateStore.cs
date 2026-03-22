@@ -9,12 +9,14 @@ public class LobbyStateStore
     private const int MinMaxPlayers = 2;
     private const int MaxMaxPlayers = 4;
 
+    public LocalPlayerProfile LocalPlayer { get; private set; }
     public RoomDraft CurrentDraft { get; private set; }
     public RoomState CurrentRoom { get; private set; }
     public List<RoomState> Rooms { get; } = new List<RoomState>();
 
     public LobbyStateStore()
     {
+        InitializeLocalPlayer();
         ResetDraft();
     }
 
@@ -25,6 +27,8 @@ public class LobbyStateStore
 
     public void CreateRoomFromDraft()
     {
+        InitializeLocalPlayer();
+
         if (CurrentDraft == null)
         {
             ResetDraft();
@@ -49,11 +53,11 @@ public class LobbyStateStore
             {
                 new PlayerState
                 {
-                    playerId = "local_player",
-                    displayName = "You",
+                    playerId = LocalPlayer.playerId,
+                    displayName = LocalPlayer.displayName,
                     isReady = false,
                     isHost = true,
-                    selectedColorIndex = 0
+                    selectedColorIndex = LocalPlayer.selectedColorIndex
                 }
             }
         };
@@ -70,6 +74,16 @@ public class LobbyStateStore
     public void SetCurrentRoom(RoomState room)
     {
         CurrentRoom = room;
+    }
+
+    private void InitializeLocalPlayer()
+    {
+        if (LocalPlayer == null)
+        {
+            LocalPlayer = new LocalPlayerProfile();
+        }
+
+        LocalPlayer.EnsureDefaults();
     }
 
     private string GenerateUniqueRoomId()
