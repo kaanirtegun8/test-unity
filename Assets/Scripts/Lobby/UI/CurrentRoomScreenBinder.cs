@@ -50,7 +50,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
     [SerializeField] private Color startGameDisabledTint = new Color(0.52f, 0.56f, 0.62f, 0.92f);
     [SerializeField] private Color startGameEnabledTextColor = Color.white;
     [SerializeField] private Color startGameDisabledTextColor = new Color(0.84f, 0.88f, 0.94f, 0.95f);
-    [SerializeField] private string localPlayerFallbackName = "You";
+    [SerializeField] private string localPlayerFallbackName = "Player";
     [SerializeField] private string localPlayerHostBadgeLabel = "Host";
     [SerializeField] private Color localPlayerNameColor = Color.white;
     [SerializeField] private Color localPlayerHostBadgeColor = new Color(0.77f, 0.92f, 0.56f, 1f);
@@ -946,11 +946,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             return;
         }
 
-        string displayName = !string.IsNullOrWhiteSpace(localPlayer.displayName)
-            ? localPlayer.displayName
-            : (SharedStore.LocalPlayer != null && !string.IsNullOrWhiteSpace(SharedStore.LocalPlayer.displayName)
-                ? SharedStore.LocalPlayer.displayName
-                : localPlayerFallbackName);
+        string displayName = ResolveLocalPlayerDisplayName(localPlayer);
 
         playerSlot01NameText.text = displayName;
         playerSlot01NameText.gameObject.SetActive(true);
@@ -958,6 +954,32 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         bool isHost = localPlayer.isHost;
         playerSlot01HostBadgeText.text = isHost ? localPlayerHostBadgeLabel : string.Empty;
         playerSlot01HostBadgeText.gameObject.SetActive(isHost);
+    }
+
+    private string ResolveLocalPlayerDisplayName(PlayerState localPlayer)
+    {
+        if (localPlayer != null)
+        {
+            string playerName = localPlayer.displayName != null ? localPlayer.displayName.Trim() : string.Empty;
+            if (!string.IsNullOrWhiteSpace(playerName))
+            {
+                return playerName;
+            }
+        }
+
+        if (SharedStore.LocalPlayer != null)
+        {
+            string localProfileName = SharedStore.LocalPlayer.displayName != null
+                ? SharedStore.LocalPlayer.displayName.Trim()
+                : string.Empty;
+            if (!string.IsNullOrWhiteSpace(localProfileName))
+            {
+                return localProfileName;
+            }
+        }
+
+        string configuredFallback = localPlayerFallbackName != null ? localPlayerFallbackName.Trim() : string.Empty;
+        return string.IsNullOrWhiteSpace(configuredFallback) ? "Player" : configuredFallback;
     }
 
     private void ClearLocalPlayerIdentity()

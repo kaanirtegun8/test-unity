@@ -100,6 +100,37 @@ public class LobbyStateStore
         LocalPlayer.selectedColorIndex = Math.Max(0, value);
     }
 
+    public void SyncLocalPlayerFromAuth(AuthUser authUser)
+    {
+        InitializeLocalPlayer();
+
+        if (authUser == null)
+        {
+            return;
+        }
+
+        string trimmedUserId = authUser.userId != null ? authUser.userId.Trim() : string.Empty;
+        if (!string.IsNullOrWhiteSpace(trimmedUserId))
+        {
+            LocalPlayer.playerId = trimmedUserId;
+        }
+
+        string trimmedDisplayName = authUser.displayName != null ? authUser.displayName.Trim() : string.Empty;
+        if (!string.IsNullOrWhiteSpace(trimmedDisplayName))
+        {
+            LocalPlayer.displayName = trimmedDisplayName;
+        }
+        else
+        {
+            string existingName = LocalPlayer.displayName != null ? LocalPlayer.displayName.Trim() : string.Empty;
+            LocalPlayer.displayName = string.IsNullOrWhiteSpace(existingName)
+                ? DefaultLocalDisplayName
+                : existingName;
+        }
+
+        LocalPlayer.EnsureDefaults();
+    }
+
     private void InitializeLocalPlayer()
     {
         if (LocalPlayer == null)
