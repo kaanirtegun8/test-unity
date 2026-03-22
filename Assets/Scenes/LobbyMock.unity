@@ -2728,7 +2728,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &431151046
 RectTransform:
   m_ObjectHideFlags: 0
@@ -4697,7 +4697,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!224 &783770500
 RectTransform:
   m_ObjectHideFlags: 0
@@ -9070,7 +9070,41 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::CurrentRoomScreenBinder
   roomNameText: {fileID: 580113710}
   roomIdText: {fileID: 1694064104}
+  copyRoomIdButton: {fileID: 1603325845}
+  startGameButton: {fileID: 1300028109}
   roomPlayerCountText: {fileID: 333129247}
+  sidePlayerCountText: {fileID: 507093800}
+  sideRewardText: {fileID: 1531439555}
+  sideMapPreview: {fileID: 1783001129}
+  playerSlots:
+  - {fileID: 706595835}
+  - {fileID: 241037317}
+  - {fileID: 755165721}
+  - {fileID: 929404992}
+  playerSlot01StatusButton: {fileID: 1404672973}
+  playerSlot01StatusButtonImage: {fileID: 1404672974}
+  playerSlot01StatusText: {fileID: 1038767318}
+  hostReadyButtonSprite: {fileID: 21300000, guid: 7194b907763190b4ab82436aaba93472, type: 3}
+  hostNotReadyButtonSprite: {fileID: 21300000, guid: 72c72df40bd317b44ab2c02d03f268c7, type: 3}
+  sideMapPreviewAlpha: 1
+  occupiedSlotStatusText: Waiting...
+  availableSlotStatusText: Empty
+  lockedSlotStatusText: Locked
+  hostReadyActionText: Ready Up
+  hostReadyStateText: Cancel Ready
+  otherPlayerReadyText: Ready
+  otherPlayerNotReadyText: Not Ready
+  availableSlotAlpha: 0.82
+  lockedSlotAlpha: 0.42
+  hostReadyButtonTint: {r: 0.36, g: 0.86, b: 0.28, a: 1}
+  hostNotReadyButtonTint: {r: 0.62, g: 0.66, b: 0.73, a: 0.95}
+  emptyStateButtonTint: {r: 0.62, g: 0.66, b: 0.73, a: 0.85}
+  lockedStateButtonTint: {r: 0.52, g: 0.56, b: 0.62, a: 0.75}
+  copyTooltipMessage: Copied
+  copyTooltipDuration: 1.2
+  copyTooltipSize: {x: 120, y: 34}
+  copyTooltipBackgroundColor: {r: 0.19, g: 0.7, b: 0.29, a: 0.96}
+  copyTooltipTextColor: {r: 1, g: 1, b: 1, a: 1}
 --- !u!1 &1632648742
 GameObject:
   m_ObjectHideFlags: 0
