@@ -6,6 +6,7 @@ public class LobbyStateStore
     public static LobbyStateStore Local { get; } = new LobbyStateStore();
 
     private readonly Random roomIdRandom = new Random();
+    private const string DefaultLocalDisplayName = "You";
     private const int MinMaxPlayers = 2;
     private const int MaxMaxPlayers = 4;
 
@@ -74,6 +75,29 @@ public class LobbyStateStore
     public void SetCurrentRoom(RoomState room)
     {
         CurrentRoom = room;
+    }
+
+    public void SetLocalDisplayName(string value)
+    {
+        InitializeLocalPlayer();
+
+        string trimmedInput = value != null ? value.Trim() : string.Empty;
+        if (!string.IsNullOrWhiteSpace(trimmedInput))
+        {
+            LocalPlayer.displayName = trimmedInput;
+            return;
+        }
+
+        string existingName = LocalPlayer.displayName != null ? LocalPlayer.displayName.Trim() : string.Empty;
+        LocalPlayer.displayName = string.IsNullOrWhiteSpace(existingName)
+            ? DefaultLocalDisplayName
+            : existingName;
+    }
+
+    public void SetLocalSelectedColorIndex(int value)
+    {
+        InitializeLocalPlayer();
+        LocalPlayer.selectedColorIndex = Math.Max(0, value);
     }
 
     private void InitializeLocalPlayer()
