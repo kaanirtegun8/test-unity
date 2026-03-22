@@ -6,10 +6,17 @@ using UnityEngine.UI;
 public class RoomBrowserScreenBinder : MonoBehaviour
 {
     private const string RuntimeItemNamePrefix = "RuntimeRoomItem_";
-    private static readonly Vector2 RoomNameAnchoredPosition = new Vector2(304f, 14f);
-    private static readonly Vector2 RoomNameSize = new Vector2(560f, 46f);
-    private static readonly Vector2 RoomIdAnchoredPosition = new Vector2(304f, -16f);
-    private static readonly Vector2 RoomIdSize = new Vector2(420f, 34f);
+    private const int MockRowCount = 3;
+    private const float RowHeight = 170f;
+    private const float RowSpacing = 14f;
+    private const float RowHorizontalPadding = -8f;
+
+    private static readonly Vector2 MapAnchoredPosition = new Vector2(230f, 0f);
+    private static readonly Vector2 MapSize = new Vector2(230f, 132f);
+    private static readonly Vector2 RoomNameAnchoredPosition = new Vector2(500f, -2f);
+    private static readonly Vector2 RoomNameSize = new Vector2(510f, 56f);
+    private static readonly Vector2 RoomIdAnchoredPosition = new Vector2(120f, -2f);
+    private static readonly Vector2 RoomIdSize = new Vector2(200f, 40f);
 
     [SerializeField] private RectTransform contentRoot;
     [SerializeField] private GameObject roomListItemPrefab;
@@ -21,6 +28,7 @@ public class RoomBrowserScreenBinder : MonoBehaviour
     [SerializeField] private bool logRefreshInfo = true;
 
     private Transform templateItemTransform;
+    private int lastRefreshFrame = -1;
 
     private LobbyStateStore SharedStore => LobbyStateStore.Local;
 
@@ -47,6 +55,11 @@ public class RoomBrowserScreenBinder : MonoBehaviour
     [ContextMenu("Refresh Room List")]
     public void RefreshRoomList()
     {
+        if (Application.isPlaying && lastRefreshFrame == Time.frameCount)
+        {
+            return;
+        }
+
         AutoAssignReferences();
 
         if (contentRoot == null)
@@ -62,7 +75,9 @@ public class RoomBrowserScreenBinder : MonoBehaviour
         ResolveTemplateItem();
         ClearRuntimeItems();
 
-        if (SharedStore.Rooms == null || SharedStore.Rooms.Count == 0)
+        bool hasRealRooms = SharedStore.Rooms != null && SharedStore.Rooms.Count > 0;
+        int rowCount = hasRealRooms ? SharedStore.Rooms.Count : MockRowCount;
+        if (rowCount <= 0)
         {
             if (logRefreshInfo)
             {
@@ -87,17 +102,25 @@ public class RoomBrowserScreenBinder : MonoBehaviour
             templateItemTransform.gameObject.SetActive(false);
         }
 
-        for (int i = 0; i < SharedStore.Rooms.Count; i++)
+        PrepareContentRootLayout(rowCount);
+
+        for (int i = 0; i < rowCount; i++)
         {
             GameObject instance = Instantiate(roomListItemPrefab, contentRoot, false);
             instance.name = RuntimeItemNamePrefix + (i + 1).ToString("00");
             instance.SetActive(true);
-            BindRoomItem(instance, SharedStore.Rooms[i], i);
+            ApplyRowContainerLayout(instance, i);
+            BindRoomItem(instance, hasRealRooms ? SharedStore.Rooms[i] : null, i);
+        }
+
+        if (Application.isPlaying)
+        {
+            lastRefreshFrame = Time.frameCount;
         }
 
         if (logRefreshInfo)
         {
-            Debug.Log($"RoomBrowserScreenBinder: Refreshed {SharedStore.Rooms.Count} room item(s).");
+            Debug.Log($"RoomBrowserScreenBinder: Refreshed {rowCount} room item(s).");
         }
     }
 
@@ -113,12 +136,12 @@ public class RoomBrowserScreenBinder : MonoBehaviour
 
             if (child.name.StartsWith(RuntimeItemNamePrefix, StringComparison.Ordinal))
             {
-                Destroy(child.gameObject);
+                DestroyForCurrentMode(child.gameObject);
                 continue;
             }
 
             // Design-time mock rows should not stay visible once runtime list is rendered.
-            Destroy(child.gameObject);
+            DestroyForCurrentMode(child.gameObject);
         }
     }
 
@@ -178,9 +201,11 @@ public class RoomBrowserScreenBinder : MonoBehaviour
             return;
         }
 
-        int playerCount = roomState != null && roomState.players != null ? roomState.players.Count : 0;
-        int maxPlayers = roomState != null ? Mathf.Max(0, roomState.maxPlayers) : 0;
-        int treasureCount = roomState != null ? Mathf.Max(0, roomState.treasureCount) : 0;
+        bool hasRealRoom = roomState != null;
+        int playerCount = hasRealRoom && roomState.players != null ? roomState.players.Count : GetMockPlayerCount(rowIndex);
+        int maxPlayers = hasRealRoom ? Mathf.Max(0, roomState.maxPlayers) : GetMockMaxPlayers(rowIndex);
+        int treasureCount = hasRealRoom ? Mathf.Max(0, roomState.treasureCount) : GetMockTreasureCount(rowIndex);
+        ApplyMapThumbnailVisual(itemObject.transform);
 
         TMP_Text playerCountText = FindTextByName(itemObject.transform, "PlayerCountText");
         if (playerCountText != null)
@@ -197,9 +222,9 @@ public class RoomBrowserScreenBinder : MonoBehaviour
         TMP_Text roomNameText = FindTextByName(itemObject.transform, "RoomNameText");
         if (roomNameText != null)
         {
-            string safeRoomName = roomState != null && !string.IsNullOrWhiteSpace(roomState.roomName)
+            string safeRoomName = hasRealRoom && !string.IsNullOrWhiteSpace(roomState.roomName)
                 ? roomState.roomName
-                : $"Room {rowIndex + 1}";
+                : "Funny Match";
             ApplyRoomNameVisual(roomNameText);
             roomNameText.text = safeRoomName;
         }
@@ -212,9 +237,15 @@ public class RoomBrowserScreenBinder : MonoBehaviour
 
         if (roomIdText != null)
         {
-            string safeRoomId = roomState != null && !string.IsNullOrWhiteSpace(roomState.roomId)
+            string safeRoomId = hasRealRoom && !string.IsNullOrWhiteSpace(roomState.roomId)
                 ? roomState.roomId
                 : (456790 + rowIndex).ToString();
+
+            if (hasRealRoom && string.IsNullOrWhiteSpace(roomState.roomId))
+            {
+                roomState.roomId = safeRoomId;
+            }
+
             ApplyRoomIdVisual(roomIdText);
             roomIdText.text = $"ID: {safeRoomId}";
         }
@@ -233,6 +264,24 @@ public class RoomBrowserScreenBinder : MonoBehaviour
                     : Color.white;
             }
         }
+    }
+
+    private static int GetMockPlayerCount(int rowIndex)
+    {
+        int[] values = { 2, 3, 1 };
+        return values[Mathf.Abs(rowIndex) % values.Length];
+    }
+
+    private static int GetMockMaxPlayers(int rowIndex)
+    {
+        int[] values = { 4, 6, 4 };
+        return values[Mathf.Abs(rowIndex) % values.Length];
+    }
+
+    private static int GetMockTreasureCount(int rowIndex)
+    {
+        int[] values = { 2, 2, 1 };
+        return values[Mathf.Abs(rowIndex) % values.Length];
     }
 
     private static Transform FindByName(Transform[] allTransforms, string targetName)
@@ -308,7 +357,7 @@ public class RoomBrowserScreenBinder : MonoBehaviour
 
         roomNameText.enableWordWrapping = false;
         roomNameText.overflowMode = TextOverflowModes.Ellipsis;
-        roomNameText.alignment = TextAlignmentOptions.Left;
+        roomNameText.alignment = TextAlignmentOptions.MidlineLeft;
         roomNameText.fontStyle = FontStyles.Bold;
         roomNameText.fontSize = 32f;
         roomNameText.color = Color.white;
@@ -330,10 +379,10 @@ public class RoomBrowserScreenBinder : MonoBehaviour
 
         roomIdText.enableWordWrapping = false;
         roomIdText.overflowMode = TextOverflowModes.Ellipsis;
-        roomIdText.alignment = TextAlignmentOptions.Left;
+        roomIdText.alignment = TextAlignmentOptions.MidlineLeft;
         roomIdText.fontStyle = FontStyles.Normal;
-        roomIdText.fontSize = 22f;
-        roomIdText.color = new Color(0.92f, 0.96f, 1f, 1f);
+        roomIdText.fontSize = 24f;
+        roomIdText.color = new Color(0.97f, 0.99f, 1f, 1f);
     }
 
     private static TMP_Text CreateRoomIdText(Transform itemRoot, TMP_Text roomNameReference)
@@ -354,5 +403,84 @@ public class RoomBrowserScreenBinder : MonoBehaviour
 
         ApplyRoomIdVisual(roomIdText);
         return roomIdText;
+    }
+
+    private static void ApplyMapThumbnailVisual(Transform itemRoot)
+    {
+        if (itemRoot == null)
+        {
+            return;
+        }
+
+        Transform mapTransform = itemRoot.Find("MapThumbnail");
+        if (mapTransform == null)
+        {
+            return;
+        }
+
+        RectTransform mapRect = mapTransform as RectTransform;
+        if (mapRect == null)
+        {
+            return;
+        }
+
+        mapRect.anchorMin = new Vector2(0f, 0.5f);
+        mapRect.anchorMax = new Vector2(0f, 0.5f);
+        mapRect.pivot = new Vector2(0f, 0.5f);
+        mapRect.anchoredPosition = MapAnchoredPosition;
+        mapRect.sizeDelta = MapSize;
+    }
+
+    private static void DestroyForCurrentMode(GameObject target)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        if (Application.isEditor)
+        {
+            DestroyImmediate(target);
+            return;
+        }
+
+        Destroy(target);
+    }
+
+    private void PrepareContentRootLayout(int rowCount)
+    {
+        if (contentRoot == null)
+        {
+            return;
+        }
+
+        float totalHeight = rowCount * RowHeight + Mathf.Max(0, rowCount - 1) * RowSpacing;
+
+        contentRoot.anchorMin = new Vector2(0f, 1f);
+        contentRoot.anchorMax = new Vector2(1f, 1f);
+        contentRoot.pivot = new Vector2(0.5f, 1f);
+        contentRoot.anchoredPosition = Vector2.zero;
+        contentRoot.sizeDelta = new Vector2(0f, totalHeight);
+    }
+
+    private static void ApplyRowContainerLayout(GameObject itemObject, int index)
+    {
+        if (itemObject == null)
+        {
+            return;
+        }
+
+        RectTransform rect = itemObject.GetComponent<RectTransform>();
+        if (rect == null)
+        {
+            return;
+        }
+
+        float top = index * (RowHeight + RowSpacing);
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(1f, 1f);
+        rect.pivot = new Vector2(0.5f, 1f);
+        rect.offsetMin = new Vector2(RowHorizontalPadding, -(top + RowHeight));
+        rect.offsetMax = new Vector2(-RowHorizontalPadding, -top);
     }
 }
