@@ -1,3 +1,4 @@
+using System.Collections;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -15,6 +16,8 @@ public class CurrentRoomScreenBinder : MonoBehaviour
 
     [SerializeField] private TMP_Text roomNameText;
     [SerializeField] private TMP_Text roomIdText;
+    [SerializeField] private Button copyRoomIdButton;
+    [SerializeField] private Button startGameButton;
     [SerializeField] private TMP_Text roomPlayerCountText;
     [SerializeField] private TMP_Text sidePlayerCountText;
     [SerializeField] private TMP_Text sideRewardText;
@@ -39,6 +42,12 @@ public class CurrentRoomScreenBinder : MonoBehaviour
     [SerializeField] private Color hostNotReadyButtonTint = new Color(0.62f, 0.66f, 0.73f, 0.95f);
     [SerializeField] private Color emptyStateButtonTint = new Color(0.62f, 0.66f, 0.73f, 0.85f);
     [SerializeField] private Color lockedStateButtonTint = new Color(0.52f, 0.56f, 0.62f, 0.75f);
+    [SerializeField] private string copyTooltipMessage = "Copied";
+    [SerializeField] private float copyTooltipDuration = 1.2f;
+
+    private GameObject copyTooltipObject;
+    private TMP_Text copyTooltipText;
+    private Coroutine copyTooltipHideRoutine;
 
     private static readonly Color[] SideMapPreviewPalette =
     {
@@ -65,7 +74,15 @@ public class CurrentRoomScreenBinder : MonoBehaviour
 
     private void OnEnable()
     {
+        AutoAssignReferences();
         BindUiEvents();
+        ApplyCurrentRoomToUi();
+    }
+
+    private void Start()
+    {
+        // Ensure first visible frame uses CurrentRoom-driven state
+        // even if another presenter touched button interactable in OnEnable.
         ApplyCurrentRoomToUi();
     }
 
@@ -125,6 +142,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             sideRewardText.text = $"x{safeTreasureCount}";
         }
 
+        ApplyStartGameButtonState(safePlayerCount);
         ApplyPlayerSlotsVisuals(currentRoom, safePlayerCount, safeMaxPlayers);
         ApplySideMapPreviewVisual(currentRoom.selectedMapIndex);
     }
@@ -156,8 +174,19 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             sideRewardText.text = "x2";
         }
 
+        ApplyStartGameButtonState(0);
         ApplyPlayerSlotsVisuals(null, 0, DefaultSlotCount);
         ApplySideMapPreviewVisual(0);
+    }
+
+    private void ApplyStartGameButtonState(int playerCount)
+    {
+        if (startGameButton == null)
+        {
+            return;
+        }
+
+        startGameButton.interactable = playerCount >= 2;
     }
 
     private void ApplyPlayerSlotsVisuals(RoomState currentRoom, int playerCount, int maxPlayers)
@@ -456,6 +485,12 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             playerSlot01StatusButton.onClick.RemoveListener(OnPlayerSlot01StatusClicked);
             playerSlot01StatusButton.onClick.AddListener(OnPlayerSlot01StatusClicked);
         }
+
+        if (copyRoomIdButton != null)
+        {
+            copyRoomIdButton.onClick.RemoveListener(OnCopyRoomIdButtonClicked);
+            copyRoomIdButton.onClick.AddListener(OnCopyRoomIdButtonClicked);
+        }
     }
 
     private void UnbindUiEvents()
@@ -463,6 +498,11 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         if (playerSlot01StatusButton != null)
         {
             playerSlot01StatusButton.onClick.RemoveListener(OnPlayerSlot01StatusClicked);
+        }
+
+        if (copyRoomIdButton != null)
+        {
+            copyRoomIdButton.onClick.RemoveListener(OnCopyRoomIdButtonClicked);
         }
     }
 
@@ -477,6 +517,95 @@ public class CurrentRoomScreenBinder : MonoBehaviour
 
         localHostPlayer.isReady = !localHostPlayer.isReady;
         ApplyCurrentRoomToUi();
+    }
+
+    private void OnCopyRoomIdButtonClicked()
+    {
+        RoomState currentRoom = SharedStore.CurrentRoom;
+        if (currentRoom == null || string.IsNullOrWhiteSpace(currentRoom.roomId))
+        {
+            return;
+        }
+
+        GUIUtility.systemCopyBuffer = currentRoom.roomId;
+        ShowCopyTooltip();
+    }
+
+    private void ShowCopyTooltip()
+    {
+        EnsureCopyTooltip();
+        if (copyTooltipObject == null || copyTooltipText == null)
+        {
+            return;
+        }
+
+        copyTooltipText.text = string.IsNullOrWhiteSpace(copyTooltipMessage) ? "Copied" : copyTooltipMessage;
+        copyTooltipObject.SetActive(true);
+
+        if (copyTooltipHideRoutine != null)
+        {
+            StopCoroutine(copyTooltipHideRoutine);
+        }
+
+        copyTooltipHideRoutine = StartCoroutine(HideCopyTooltipAfterDelay());
+    }
+
+    private IEnumerator HideCopyTooltipAfterDelay()
+    {
+        yield return new WaitForSeconds(Mathf.Max(0.2f, copyTooltipDuration));
+
+        if (copyTooltipObject != null)
+        {
+            copyTooltipObject.SetActive(false);
+        }
+
+        copyTooltipHideRoutine = null;
+    }
+
+    private void EnsureCopyTooltip()
+    {
+        if (copyTooltipObject != null || copyRoomIdButton == null)
+        {
+            return;
+        }
+
+        GameObject tooltipRoot = new GameObject("CopyTooltip", typeof(RectTransform), typeof(Image));
+        tooltipRoot.transform.SetParent(copyRoomIdButton.transform, false);
+
+        RectTransform tooltipRect = tooltipRoot.GetComponent<RectTransform>();
+        tooltipRect.anchorMin = new Vector2(1f, 0.5f);
+        tooltipRect.anchorMax = new Vector2(1f, 0.5f);
+        tooltipRect.pivot = new Vector2(0f, 0.5f);
+        tooltipRect.anchoredPosition = new Vector2(10f, 0f);
+        tooltipRect.sizeDelta = new Vector2(78f, 26f);
+
+        Image tooltipBackground = tooltipRoot.GetComponent<Image>();
+        tooltipBackground.color = new Color(0.08f, 0.14f, 0.28f, 0.95f);
+        tooltipBackground.raycastTarget = false;
+
+        GameObject labelObject = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
+        labelObject.transform.SetParent(tooltipRoot.transform, false);
+
+        RectTransform labelRect = labelObject.GetComponent<RectTransform>();
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.offsetMin = new Vector2(6f, 2f);
+        labelRect.offsetMax = new Vector2(-6f, -2f);
+
+        TextMeshProUGUI label = labelObject.GetComponent<TextMeshProUGUI>();
+        label.alignment = TextAlignmentOptions.Center;
+        label.text = copyTooltipMessage;
+        label.fontSize = roomIdText != null ? roomIdText.fontSize : 14f;
+        label.color = Color.white;
+        label.raycastTarget = false;
+        if (roomIdText != null && roomIdText.font != null)
+        {
+            label.font = roomIdText.font;
+        }
+
+        tooltipRoot.SetActive(false);
+        copyTooltipObject = tooltipRoot;
+        copyTooltipText = label;
     }
 
     private static PlayerState FindLocalHostPlayer(RoomState currentRoom)
@@ -515,6 +644,16 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         if (roomIdText == null)
         {
             roomIdText = FindTextByName(allTransforms, "RoomIdText");
+        }
+
+        if (copyRoomIdButton == null)
+        {
+            copyRoomIdButton = FindButtonByName(allTransforms, "CopyRoomIdButton");
+        }
+
+        if (startGameButton == null)
+        {
+            startGameButton = FindButtonByName(allTransforms, "StartGameButton");
         }
 
         if (roomPlayerCountText == null)
@@ -649,6 +788,19 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             if (allTransforms[i].name == targetName)
             {
                 return allTransforms[i].GetComponent<Image>();
+            }
+        }
+
+        return null;
+    }
+
+    private static Button FindButtonByName(Transform[] allTransforms, string targetName)
+    {
+        for (int i = 0; i < allTransforms.Length; i++)
+        {
+            if (allTransforms[i].name == targetName)
+            {
+                return allTransforms[i].GetComponent<Button>();
             }
         }
 

@@ -9,6 +9,7 @@ public class LobbyStateStore
 
     public RoomDraft CurrentDraft { get; private set; }
     public RoomState CurrentRoom { get; private set; }
+    public List<RoomState> Rooms { get; } = new List<RoomState>();
 
     public LobbyStateStore()
     {
@@ -47,6 +48,8 @@ public class LobbyStateStore
                 }
             }
         };
+
+        Rooms.Add(CurrentRoom);
     }
 
     public void ClearCurrentRoom()
