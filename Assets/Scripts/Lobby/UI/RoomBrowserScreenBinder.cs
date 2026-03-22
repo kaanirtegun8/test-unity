@@ -1,11 +1,17 @@
 using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using Unity.Services.Lobbies.Models;
 
 public class RoomBrowserScreenBinder : MonoBehaviour
 {
     private const string RuntimeItemNamePrefix = "RuntimeRoomItem_";
+    private const string LobbyDataKeyRoomName = "roomName";
+    private const string LobbyDataKeyTreasureCount = "treasureCount";
+    private const string LobbyDataKeySelectedMapIndex = "selectedMapIndex";
     private const float RowHeight = 170f;
     private const float RowSpacing = 14f;
     private const float RowHorizontalPadding = -8f;
@@ -22,6 +28,15 @@ public class RoomBrowserScreenBinder : MonoBehaviour
     private static readonly Vector2 RewardAreaSize = new Vector2(220f, 92f);
     private static readonly Vector2 JoinButtonAnchoredPosition = new Vector2(-24f, 0f);
     private static readonly Vector2 JoinButtonSize = new Vector2(260f, 130f);
+    private static readonly Color[] MapThumbnailPalette =
+    {
+        new Color(0.27f, 0.44f, 0.66f, 1f),
+        new Color(0.35f, 0.52f, 0.40f, 1f),
+        new Color(0.48f, 0.34f, 0.34f, 1f),
+        new Color(0.34f, 0.55f, 0.62f, 1f),
+        new Color(0.47f, 0.38f, 0.66f, 1f),
+        new Color(0.64f, 0.43f, 0.26f, 1f)
+    };
 
     [SerializeField] private RectTransform contentRoot;
     [SerializeField] private GameObject roomListItemPrefab;
@@ -34,14 +49,18 @@ public class RoomBrowserScreenBinder : MonoBehaviour
     [SerializeField] private bool refreshOnEnable;
     [SerializeField] private bool hideTemplateItemOnRuntime = true;
     [SerializeField] private bool logRefreshInfo = true;
+    [SerializeField] private bool useUnityLobbyQuery = true;
 
     private Transform templateItemTransform;
     private int lastRefreshFrame = -1;
+    private bool isRefreshInProgress;
+    private UnityLobbyService lobbyService;
 
     private LobbyStateStore SharedStore => LobbyStateStore.Local;
 
     private void Awake()
     {
+        lobbyService = new UnityLobbyService();
         AutoAssignReferences();
         BindControlButtons();
     }
@@ -82,68 +101,325 @@ public class RoomBrowserScreenBinder : MonoBehaviour
             return;
         }
 
-        AutoAssignReferences();
+        _ = RefreshRoomListAsync();
+    }
 
-        if (contentRoot == null)
+    private async Task RefreshRoomListAsync()
+    {
+        if (isRefreshInProgress)
         {
-            if (logRefreshInfo)
-            {
-                Debug.LogWarning("RoomBrowserScreenBinder: ContentRoot is not assigned.");
-            }
-
             return;
         }
 
-        ResolveTemplateItem();
-        ClearRuntimeItems();
-
-        if (templateItemTransform != null && hideTemplateItemOnRuntime)
+        isRefreshInProgress = true;
+        try
         {
-            templateItemTransform.gameObject.SetActive(false);
+            AutoAssignReferences();
+
+            if (contentRoot == null)
+            {
+                if (logRefreshInfo)
+                {
+                    Debug.LogWarning("RoomBrowserScreenBinder: ContentRoot is not assigned.");
+                }
+
+                return;
+            }
+
+            ResolveTemplateItem();
+            ClearRuntimeItems();
+
+            if (templateItemTransform != null && hideTemplateItemOnRuntime)
+            {
+                templateItemTransform.gameObject.SetActive(false);
+            }
+
+            bool usedUnityLobbyData = false;
+            List<RoomState> rowsToRender = null;
+
+            if (Application.isPlaying && useUnityLobbyQuery)
+            {
+                QueryResponse queryResponse = await QueryUnityLobbiesAsync();
+                if (queryResponse != null && queryResponse.Results != null)
+                {
+                    usedUnityLobbyData = true;
+                    rowsToRender = ConvertLobbiesToRoomStates(queryResponse.Results);
+                }
+                else if (logRefreshInfo)
+                {
+                    Debug.LogWarning("RoomBrowserScreenBinder: Unity Lobby query failed or returned null. Falling back to local rooms.");
+                }
+            }
+
+            if (rowsToRender == null)
+            {
+                rowsToRender = SharedStore.Rooms != null ? SharedStore.Rooms : new List<RoomState>();
+            }
+
+            int rowCount = rowsToRender.Count;
+            if (rowCount <= 0)
+            {
+                if (logRefreshInfo)
+                {
+                    Debug.Log(usedUnityLobbyData
+                        ? "RoomBrowserScreenBinder: Unity Lobby query returned no lobbies."
+                        : "RoomBrowserScreenBinder: Rooms list is empty.");
+                }
+
+                return;
+            }
+
+            if (roomListItemPrefab == null)
+            {
+                if (logRefreshInfo)
+                {
+                    Debug.LogWarning("RoomBrowserScreenBinder: RoomListItemPrefab is not assigned.");
+                }
+
+                return;
+            }
+
+            PrepareContentRootLayout(rowCount);
+
+            for (int i = 0; i < rowCount; i++)
+            {
+                GameObject instance = Instantiate(roomListItemPrefab, contentRoot, false);
+                instance.name = RuntimeItemNamePrefix + (i + 1).ToString("00");
+                instance.SetActive(true);
+                ApplyRowContainerLayout(instance, i);
+                BindRoomItem(instance, rowsToRender[i], i, HandleJoinButtonClicked);
+            }
+
+            if (Application.isPlaying)
+            {
+                lastRefreshFrame = Time.frameCount;
+            }
+
+            if (logRefreshInfo)
+            {
+                Debug.Log(usedUnityLobbyData
+                    ? $"RoomBrowserScreenBinder: Refreshed {rowCount} lobby row(s) from Unity Lobby query."
+                    : $"RoomBrowserScreenBinder: Refreshed {rowCount} room item(s).");
+            }
+        }
+        finally
+        {
+            isRefreshInProgress = false;
+        }
+    }
+
+    private async Task<QueryResponse> QueryUnityLobbiesAsync()
+    {
+        if (lobbyService == null)
+        {
+            lobbyService = new UnityLobbyService();
         }
 
-        bool hasRealRooms = SharedStore.Rooms != null && SharedStore.Rooms.Count > 0;
-        int rowCount = hasRealRooms ? SharedStore.Rooms.Count : 0;
-        if (rowCount <= 0)
+        try
+        {
+            return await lobbyService.QueryLobbiesAsync();
+        }
+        catch (Exception exception)
         {
             if (logRefreshInfo)
             {
-                Debug.Log("RoomBrowserScreenBinder: Rooms list is empty.");
+                Debug.LogWarning($"RoomBrowserScreenBinder: Unity Lobby query threw safely. {exception.Message}");
             }
 
-            return;
+            return null;
+        }
+    }
+
+    private static List<RoomState> ConvertLobbiesToRoomStates(IReadOnlyList<Lobby> lobbies)
+    {
+        List<RoomState> result = new List<RoomState>();
+        if (lobbies == null)
+        {
+            return result;
         }
 
-        if (roomListItemPrefab == null)
+        for (int i = 0; i < lobbies.Count; i++)
+        {
+            Lobby lobby = lobbies[i];
+            if (lobby == null)
+            {
+                continue;
+            }
+
+            int safeMaxPlayers = Mathf.Max(1, lobby.MaxPlayers);
+            List<PlayerState> players = ConvertLobbyPlayers(lobby);
+            int fallbackPlayerCount = Mathf.Clamp(safeMaxPlayers - lobby.AvailableSlots, 0, safeMaxPlayers);
+            if (players.Count == 0 && fallbackPlayerCount > 0)
+            {
+                for (int playerIndex = 0; playerIndex < fallbackPlayerCount; playerIndex++)
+                {
+                    players.Add(new PlayerState());
+                }
+            }
+
+            string roomNameFromData = GetLobbyDataValue(lobby, LobbyDataKeyRoomName);
+            string safeLobbyName = !string.IsNullOrWhiteSpace(lobby.Name) ? lobby.Name : roomNameFromData;
+            string safeLobbyId = !string.IsNullOrWhiteSpace(lobby.Id) ? lobby.Id : lobby.LobbyCode;
+            int treasureCount = ParseLobbyDataInt(lobby, LobbyDataKeyTreasureCount, 0);
+            int selectedMapIndex = ParseLobbyDataInt(lobby, LobbyDataKeySelectedMapIndex, 0);
+
+            result.Add(new RoomState
+            {
+                roomId = string.IsNullOrWhiteSpace(safeLobbyId) ? "000000" : safeLobbyId,
+                roomName = string.IsNullOrWhiteSpace(safeLobbyName) ? "Fun Match" : safeLobbyName,
+                isPublic = !lobby.IsPrivate,
+                maxPlayers = safeMaxPlayers,
+                selectedMapIndex = Mathf.Max(0, selectedMapIndex),
+                treasureCount = Mathf.Max(0, treasureCount),
+                players = players
+            });
+        }
+
+        return result;
+    }
+
+    private static List<PlayerState> ConvertLobbyPlayers(Lobby lobby)
+    {
+        List<PlayerState> players = new List<PlayerState>();
+        if (lobby == null || lobby.Players == null)
+        {
+            return players;
+        }
+
+        for (int i = 0; i < lobby.Players.Count; i++)
+        {
+            Player lobbyPlayer = lobby.Players[i];
+            if (lobbyPlayer == null)
+            {
+                continue;
+            }
+
+            string safePlayerId = string.IsNullOrWhiteSpace(lobbyPlayer.Id) ? string.Empty : lobbyPlayer.Id.Trim();
+            string displayNameFromData = GetLobbyPlayerDataValue(lobbyPlayer, "displayName");
+            string safeDisplayName = !string.IsNullOrWhiteSpace(displayNameFromData)
+                ? displayNameFromData
+                : (!string.IsNullOrWhiteSpace(safePlayerId) ? safePlayerId : "Player");
+
+            players.Add(new PlayerState
+            {
+                playerId = safePlayerId,
+                displayName = safeDisplayName,
+                isReady = false,
+                isHost = !string.IsNullOrWhiteSpace(lobby.HostId) &&
+                         string.Equals(lobby.HostId, safePlayerId, StringComparison.Ordinal),
+                selectedColorIndex = 0
+            });
+        }
+
+        return players;
+    }
+
+    private static string GetLobbyPlayerDataValue(Player player, string key)
+    {
+        if (player == null || player.Data == null || string.IsNullOrWhiteSpace(key))
+        {
+            return string.Empty;
+        }
+
+        if (!player.Data.TryGetValue(key, out PlayerDataObject dataObject) || dataObject == null)
+        {
+            return string.Empty;
+        }
+
+        return dataObject.Value ?? string.Empty;
+    }
+
+    private static RoomState ConvertLobbyToRoomState(Lobby lobby)
+    {
+        if (lobby == null)
+        {
+            return null;
+        }
+
+        List<Lobby> singleLobbyList = new List<Lobby>(1) { lobby };
+        List<RoomState> mappedRooms = ConvertLobbiesToRoomStates(singleLobbyList);
+        return mappedRooms.Count > 0 ? mappedRooms[0] : null;
+    }
+
+    private async Task<Lobby> JoinUnityLobbyByIdAsync(string lobbyId)
+    {
+        if (lobbyService == null)
+        {
+            lobbyService = new UnityLobbyService();
+        }
+
+        try
+        {
+            return await lobbyService.JoinLobbyByIdAsync(lobbyId);
+        }
+        catch (Exception exception)
         {
             if (logRefreshInfo)
             {
-                Debug.LogWarning("RoomBrowserScreenBinder: RoomListItemPrefab is not assigned.");
+                Debug.LogWarning($"RoomBrowserScreenBinder: Unity Lobby join threw safely. {exception.Message}");
             }
 
+            return null;
+        }
+    }
+
+    private void UpsertRoomById(RoomState room)
+    {
+        if (room == null || SharedStore.Rooms == null)
+        {
             return;
         }
 
-        PrepareContentRootLayout(rowCount);
-
-        for (int i = 0; i < rowCount; i++)
+        string safeRoomId = room.roomId != null ? room.roomId.Trim() : string.Empty;
+        if (string.IsNullOrWhiteSpace(safeRoomId))
         {
-            GameObject instance = Instantiate(roomListItemPrefab, contentRoot, false);
-            instance.name = RuntimeItemNamePrefix + (i + 1).ToString("00");
-            instance.SetActive(true);
-            ApplyRowContainerLayout(instance, i);
-            BindRoomItem(instance, hasRealRooms ? SharedStore.Rooms[i] : null, i, HandleJoinButtonClicked);
+            SharedStore.Rooms.Add(room);
+            return;
         }
 
-        if (Application.isPlaying)
+        for (int i = 0; i < SharedStore.Rooms.Count; i++)
         {
-            lastRefreshFrame = Time.frameCount;
+            RoomState existingRoom = SharedStore.Rooms[i];
+            if (existingRoom == null)
+            {
+                continue;
+            }
+
+            string existingId = existingRoom.roomId != null ? existingRoom.roomId.Trim() : string.Empty;
+            if (string.Equals(existingId, safeRoomId, StringComparison.Ordinal))
+            {
+                SharedStore.Rooms[i] = room;
+                return;
+            }
         }
 
-        if (logRefreshInfo)
+        SharedStore.Rooms.Add(room);
+    }
+
+    private static int ParseLobbyDataInt(Lobby lobby, string key, int fallback)
+    {
+        string value = GetLobbyDataValue(lobby, key);
+        if (int.TryParse(value, out int parsed))
         {
-            Debug.Log($"RoomBrowserScreenBinder: Refreshed {rowCount} room item(s).");
+            return parsed;
         }
+
+        return fallback;
+    }
+
+    private static string GetLobbyDataValue(Lobby lobby, string key)
+    {
+        if (lobby == null || lobby.Data == null || string.IsNullOrWhiteSpace(key))
+        {
+            return string.Empty;
+        }
+
+        if (!lobby.Data.TryGetValue(key, out DataObject dataObject) || dataObject == null)
+        {
+            return string.Empty;
+        }
+
+        return dataObject.Value ?? string.Empty;
     }
 
     private void ClearRuntimeItems()
@@ -262,19 +538,77 @@ public class RoomBrowserScreenBinder : MonoBehaviour
 
     private void HandleJoinButtonClicked(RoomState selectedRoom)
     {
+        _ = HandleJoinButtonClickedAsync(selectedRoom);
+    }
+
+    private async Task HandleJoinButtonClickedAsync(RoomState selectedRoom)
+    {
         if (selectedRoom == null)
         {
             return;
         }
 
-        if (SharedStore.Rooms == null || !SharedStore.Rooms.Contains(selectedRoom))
+        int safeMaxPlayers = Mathf.Max(1, selectedRoom.maxPlayers);
+        int safePlayerCount = selectedRoom.players != null ? selectedRoom.players.Count : 0;
+        bool isRoomFull = safePlayerCount >= safeMaxPlayers;
+        if (isRoomFull)
         {
+            if (logRefreshInfo)
+            {
+                Debug.LogWarning("RoomBrowserScreenBinder: Join skipped because room is full.");
+            }
+
             return;
         }
 
-        bool joinedOrAlreadyMember = SharedStore.TryJoinRoom(selectedRoom);
+        RoomState targetRoom = selectedRoom;
+        if (Application.isPlaying && useUnityLobbyQuery)
+        {
+            string lobbyId = selectedRoom.roomId != null ? selectedRoom.roomId.Trim() : string.Empty;
+            if (string.IsNullOrWhiteSpace(lobbyId))
+            {
+                if (logRefreshInfo)
+                {
+                    Debug.LogWarning("RoomBrowserScreenBinder: Join skipped because lobbyId is empty.");
+                }
+
+                return;
+            }
+
+            Lobby joinedLobby = await JoinUnityLobbyByIdAsync(lobbyId);
+            if (joinedLobby == null)
+            {
+                if (logRefreshInfo)
+                {
+                    Debug.LogWarning($"RoomBrowserScreenBinder: Join failed for lobbyId={lobbyId}.");
+                }
+
+                return;
+            }
+
+            RoomState mappedRoom = ConvertLobbyToRoomState(joinedLobby);
+            if (mappedRoom == null)
+            {
+                if (logRefreshInfo)
+                {
+                    Debug.LogWarning($"RoomBrowserScreenBinder: Join succeeded but mapping failed for lobbyId={lobbyId}.");
+                }
+
+                return;
+            }
+
+            targetRoom = mappedRoom;
+            UpsertRoomById(targetRoom);
+        }
+
+        bool joinedOrAlreadyMember = SharedStore.TryJoinRoom(targetRoom);
         if (!joinedOrAlreadyMember)
         {
+            if (logRefreshInfo)
+            {
+                Debug.LogWarning("RoomBrowserScreenBinder: Join was rejected safely by local room state.");
+            }
+
             return;
         }
 
@@ -311,7 +645,8 @@ public class RoomBrowserScreenBinder : MonoBehaviour
         int playerCount = hasRealRoom && roomState.players != null ? roomState.players.Count : GetMockPlayerCount(rowIndex);
         int maxPlayers = hasRealRoom ? Mathf.Max(1, roomState.maxPlayers) : GetMockMaxPlayers(rowIndex);
         int treasureCount = hasRealRoom ? Mathf.Max(0, roomState.treasureCount) : GetMockTreasureCount(rowIndex);
-        ApplyMapThumbnailVisual(itemObject.transform);
+        int mapIndex = hasRealRoom ? Mathf.Max(0, roomState.selectedMapIndex) : rowIndex;
+        ApplyMapThumbnailVisual(itemObject.transform, mapIndex);
 
         TMP_Text playerCountText = FindTextByName(itemObject.transform, "PlayerCountText");
         if (playerCountText != null)
@@ -580,7 +915,7 @@ public class RoomBrowserScreenBinder : MonoBehaviour
         return roomIdText;
     }
 
-    private static void ApplyMapThumbnailVisual(Transform itemRoot)
+    private static void ApplyMapThumbnailVisual(Transform itemRoot, int selectedMapIndex)
     {
         if (itemRoot == null)
         {
@@ -604,6 +939,13 @@ public class RoomBrowserScreenBinder : MonoBehaviour
         mapRect.pivot = new Vector2(0f, 0.5f);
         mapRect.anchoredPosition = MapAnchoredPosition;
         mapRect.sizeDelta = MapSize;
+
+        Image mapImage = mapTransform.GetComponent<Image>();
+        if (mapImage != null && MapThumbnailPalette.Length > 0)
+        {
+            int safeIndex = Mathf.Abs(selectedMapIndex) % MapThumbnailPalette.Length;
+            mapImage.color = MapThumbnailPalette[safeIndex];
+        }
     }
 
     private static void ApplyJoinButtonVisual(Button joinButton)
