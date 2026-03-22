@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using TMPro;
@@ -50,10 +51,14 @@ public class RoomBrowserScreenBinder : MonoBehaviour
     [SerializeField] private bool hideTemplateItemOnRuntime = true;
     [SerializeField] private bool logRefreshInfo = true;
     [SerializeField] private bool useUnityLobbyQuery = true;
+    [SerializeField] private float authReadyRetryIntervalSeconds = 0.5f;
+    [SerializeField] private float authReadyRetryTimeoutSeconds = 8f;
 
     private Transform templateItemTransform;
     private int lastRefreshFrame = -1;
     private bool isRefreshInProgress;
+    private bool isAuthRetryScheduled;
+    private Coroutine authRetryCoroutine;
     private UnityLobbyService lobbyService;
 
     private LobbyStateStore SharedStore => LobbyStateStore.Local;
@@ -79,11 +84,13 @@ public class RoomBrowserScreenBinder : MonoBehaviour
     private void OnDisable()
     {
         UnbindControlButtons();
+        StopAuthRetryCoroutine();
     }
 
     private void OnDestroy()
     {
         UnbindControlButtons();
+        StopAuthRetryCoroutine();
     }
 
 #if UNITY_EDITOR
@@ -139,15 +146,22 @@ public class RoomBrowserScreenBinder : MonoBehaviour
 
             if (Application.isPlaying && useUnityLobbyQuery)
             {
-                QueryResponse queryResponse = await QueryUnityLobbiesAsync();
-                if (queryResponse != null && queryResponse.Results != null)
+                if (IsAuthReadyForLobbyQuery())
                 {
-                    usedUnityLobbyData = true;
-                    rowsToRender = ConvertLobbiesToRoomStates(queryResponse.Results);
+                    QueryResponse queryResponse = await QueryUnityLobbiesAsync();
+                    if (queryResponse != null && queryResponse.Results != null)
+                    {
+                        usedUnityLobbyData = true;
+                        rowsToRender = ConvertLobbiesToRoomStates(queryResponse.Results);
+                    }
+                    else if (logRefreshInfo)
+                    {
+                        Debug.LogWarning("RoomBrowserScreenBinder: Unity Lobby query failed or returned null. Falling back to local rooms.");
+                    }
                 }
-                else if (logRefreshInfo)
+                else
                 {
-                    Debug.LogWarning("RoomBrowserScreenBinder: Unity Lobby query failed or returned null. Falling back to local rooms.");
+                    ScheduleRefreshWhenAuthReady();
                 }
             }
 
@@ -228,6 +242,55 @@ public class RoomBrowserScreenBinder : MonoBehaviour
 
             return null;
         }
+    }
+
+    private bool IsAuthReadyForLobbyQuery()
+    {
+        AuthStateStore authStore = AuthStateStore.Local;
+        return authStore != null && authStore.IsAuthenticated;
+    }
+
+    private void ScheduleRefreshWhenAuthReady()
+    {
+        if (!Application.isPlaying || isAuthRetryScheduled)
+        {
+            return;
+        }
+
+        authRetryCoroutine = StartCoroutine(WaitForAuthThenRefreshCoroutine());
+    }
+
+    private IEnumerator WaitForAuthThenRefreshCoroutine()
+    {
+        isAuthRetryScheduled = true;
+        float safeInterval = Mathf.Max(0.1f, authReadyRetryIntervalSeconds);
+        float safeTimeout = Mathf.Max(safeInterval, authReadyRetryTimeoutSeconds);
+        float elapsed = 0f;
+
+        while (!IsAuthReadyForLobbyQuery() && elapsed < safeTimeout)
+        {
+            yield return new WaitForSeconds(safeInterval);
+            elapsed += safeInterval;
+        }
+
+        isAuthRetryScheduled = false;
+        authRetryCoroutine = null;
+
+        if (IsAuthReadyForLobbyQuery() && isActiveAndEnabled)
+        {
+            RefreshRoomList();
+        }
+    }
+
+    private void StopAuthRetryCoroutine()
+    {
+        if (authRetryCoroutine != null)
+        {
+            StopCoroutine(authRetryCoroutine);
+            authRetryCoroutine = null;
+        }
+
+        isAuthRetryScheduled = false;
     }
 
     private static List<RoomState> ConvertLobbiesToRoomStates(IReadOnlyList<Lobby> lobbies)
@@ -562,8 +625,21 @@ public class RoomBrowserScreenBinder : MonoBehaviour
         }
 
         RoomState targetRoom = selectedRoom;
-        if (Application.isPlaying && useUnityLobbyQuery)
+        bool joinedOrAlreadyMember = false;
+        bool shouldUseRealLobbyJoin = Application.isPlaying && useUnityLobbyQuery;
+
+        if (shouldUseRealLobbyJoin)
         {
+            if (!IsAuthReadyForLobbyQuery())
+            {
+                if (logRefreshInfo)
+                {
+                    Debug.LogWarning("RoomBrowserScreenBinder: Join skipped because auth is not ready.");
+                }
+
+                return;
+            }
+
             string lobbyId = selectedRoom.roomId != null ? selectedRoom.roomId.Trim() : string.Empty;
             if (string.IsNullOrWhiteSpace(lobbyId))
             {
@@ -599,9 +675,14 @@ public class RoomBrowserScreenBinder : MonoBehaviour
 
             targetRoom = mappedRoom;
             UpsertRoomById(targetRoom);
+            SharedStore.SetCurrentRoom(targetRoom);
+            joinedOrAlreadyMember = true;
+        }
+        else
+        {
+            joinedOrAlreadyMember = SharedStore.TryJoinRoom(targetRoom);
         }
 
-        bool joinedOrAlreadyMember = SharedStore.TryJoinRoom(targetRoom);
         if (!joinedOrAlreadyMember)
         {
             if (logRefreshInfo)

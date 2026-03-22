@@ -213,6 +213,7 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
 
         isCreateInProgress = true;
         LobbyStateStore store = LobbyStateStore.Local;
+        bool shouldOpenCurrentRoomScreen = false;
 
         try
         {
@@ -223,24 +224,40 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
                 draft = store.CurrentDraft;
             }
 
-            Lobby createdLobby = null;
-            if (useUnityLobbyCreate && draft != null)
+            if (useUnityLobbyCreate)
             {
-                createdLobby = await TryCreateLobbyFromDraftAsync(draft);
-            }
-
-            if (createdLobby != null)
-            {
-                ApplyCreatedLobbyToStore(store, createdLobby, draft);
+                if (!IsAuthReadyForLobbyCreate())
+                {
+                    Debug.LogWarning("LobbyMockScreenSwitcher: Create skipped because auth is not ready.");
+                }
+                else
+                {
+                    Lobby createdLobby = await TryCreateLobbyFromDraftAsync(draft);
+                    if (createdLobby != null)
+                    {
+                        ApplyCreatedLobbyToStore(store, createdLobby, draft);
+                        shouldOpenCurrentRoomScreen = true;
+                    }
+                    else
+                    {
+                        Debug.LogWarning("LobbyMockScreenSwitcher: Unity Lobby create failed safely. CurrentRoomScreen will not open.");
+                    }
+                }
             }
             else
             {
                 store.CreateRoomFromDraft();
+                shouldOpenCurrentRoomScreen = true;
             }
         }
         finally
         {
             isCreateInProgress = false;
+        }
+
+        if (!shouldOpenCurrentRoomScreen)
+        {
+            return;
         }
 
         if (createRoomScreen != null)
@@ -257,6 +274,12 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
         {
             currentRoomScreen.SetActive(true);
         }
+    }
+
+    private static bool IsAuthReadyForLobbyCreate()
+    {
+        AuthStateStore authStore = AuthStateStore.Local;
+        return authStore != null && authStore.IsAuthenticated;
     }
 
     private async Task<Lobby> TryCreateLobbyFromDraftAsync(RoomDraft draft)
@@ -408,16 +431,26 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
             LocalPlayerProfile localPlayer = store.LocalPlayer;
             string lobbyId = currentRoom != null && currentRoom.roomId != null ? currentRoom.roomId.Trim() : string.Empty;
             string playerId = localPlayer != null && localPlayer.playerId != null ? localPlayer.playerId.Trim() : string.Empty;
+            bool isAuthReady = AuthStateStore.Local != null && AuthStateStore.Local.IsAuthenticated;
+
+            if (!isAuthReady)
+            {
+                Debug.LogWarning("LobbyMockScreenSwitcher: Leave skipped because auth is not ready.");
+                return;
+            }
 
             bool hasLeaveIdentifiers = !string.IsNullOrWhiteSpace(lobbyId) && !string.IsNullOrWhiteSpace(playerId);
-            if (hasLeaveIdentifiers)
+            if (!hasLeaveIdentifiers)
             {
-                canLeave = await TryLeaveLobbyAsync(lobbyId, playerId);
-                if (!canLeave)
-                {
-                    Debug.LogWarning($"LobbyMockScreenSwitcher: Leave failed safely for lobbyId={lobbyId}.");
-                    return;
-                }
+                Debug.LogWarning("LobbyMockScreenSwitcher: Leave skipped because lobbyId or playerId is missing.");
+                return;
+            }
+
+            canLeave = await TryLeaveLobbyAsync(lobbyId, playerId);
+            if (!canLeave)
+            {
+                Debug.LogWarning($"LobbyMockScreenSwitcher: Leave failed safely for lobbyId={lobbyId}.");
+                return;
             }
         }
         finally
