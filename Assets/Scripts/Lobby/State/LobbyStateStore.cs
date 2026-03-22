@@ -80,6 +80,8 @@ public class LobbyStateStore
     public void LeaveCurrentRoomAsLocalPlayer()
     {
         RoomState room = CurrentRoom;
+        bool localWasHost = false;
+
         if (room != null && room.players != null && LocalPlayer != null)
         {
             string localPlayerId = LocalPlayer.playerId != null ? LocalPlayer.playerId.Trim() : string.Empty;
@@ -91,10 +93,20 @@ public class LobbyStateStore
                     string playerId = player != null && player.playerId != null ? player.playerId.Trim() : string.Empty;
                     if (string.Equals(playerId, localPlayerId, StringComparison.Ordinal))
                     {
+                        if (player != null && player.isHost)
+                        {
+                            localWasHost = true;
+                        }
+
                         room.players.RemoveAt(i);
                     }
                 }
             }
+        }
+
+        if (localWasHost && room != null && Rooms != null)
+        {
+            Rooms.Remove(room);
         }
 
         ClearCurrentRoom();

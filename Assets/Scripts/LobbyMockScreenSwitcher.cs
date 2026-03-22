@@ -218,5 +218,15 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
     {
         LobbyStateStore.Local.LeaveCurrentRoomAsLocalPlayer();
         ShowRoomBrowser();
+
+        if (roomBrowserScreenBinder == null && roomBrowserScreen != null)
+        {
+            roomBrowserScreenBinder = roomBrowserScreen.GetComponentInChildren<RoomBrowserScreenBinder>(true);
+        }
+
+        if (roomBrowserScreenBinder != null)
+        {
+            roomBrowserScreenBinder.RefreshRoomList();
+        }
     }
 }

@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -248,7 +249,8 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         string localPlayerId = SharedStore.LocalPlayer != null ? SharedStore.LocalPlayer.playerId : string.Empty;
         PlayerState localPlayer = FindLocalPlayer(currentRoom, localPlayerId);
         int safeMaxPlayers = Mathf.Clamp(maxPlayers, 0, playerSlots.Length);
-        int safePlayerCount = Mathf.Clamp(playerCount, 0, safeMaxPlayers);
+        List<PlayerState> slotPlayers = BuildSlotPlayers(currentRoom, localPlayer, safeMaxPlayers);
+        int occupiedSlotCount = Mathf.Clamp(slotPlayers.Count, 0, safeMaxPlayers);
 
         for (int i = 0; i < playerSlots.Length; i++)
         {
@@ -258,19 +260,23 @@ public class CurrentRoomScreenBinder : MonoBehaviour
                 continue;
             }
 
-            PlayerState slotPlayer = GetPlayerForSlot(currentRoom, localPlayer, i);
             if (i == 0)
             {
                 ClearLocalPlayerIdentity();
             }
 
-            if (i == 0 && safePlayerCount > 0 && localPlayer != null)
+            if (i < occupiedSlotCount)
             {
-                ApplyLocalPlayerSlotVisual(slot, localPlayer);
-            }
-            else if (i < safePlayerCount)
-            {
-                ApplyOtherPlayerSlotVisual(slot, slotPlayer != null && slotPlayer.isReady);
+                PlayerState slotPlayer = slotPlayers[i];
+                bool isLocalSlot = localPlayer != null && AreSamePlayer(slotPlayer, localPlayer);
+                if (i == 0 && isLocalSlot)
+                {
+                    ApplyLocalPlayerSlotVisual(slot, slotPlayer);
+                }
+                else
+                {
+                    ApplyOtherPlayerSlotVisual(slot, slotPlayer != null && slotPlayer.isReady);
+                }
             }
             else if (i < safeMaxPlayers)
             {
@@ -283,42 +289,40 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         }
     }
 
-    private static PlayerState GetPlayerForSlot(RoomState currentRoom, PlayerState localPlayer, int slotIndex)
+    private static List<PlayerState> BuildSlotPlayers(RoomState currentRoom, PlayerState localPlayer, int maxSlots)
     {
-        if (currentRoom == null || currentRoom.players == null || slotIndex < 0)
+        List<PlayerState> slotPlayers = new List<PlayerState>();
+        if (currentRoom == null || currentRoom.players == null || maxSlots <= 0)
         {
-            return null;
+            return slotPlayers;
         }
 
-        if (localPlayer == null)
+        if (localPlayer != null)
         {
-            return slotIndex < currentRoom.players.Count ? currentRoom.players[slotIndex] : null;
+            slotPlayers.Add(localPlayer);
         }
 
-        if (slotIndex == 0)
-        {
-            return localPlayer;
-        }
-
-        int targetNonLocalIndex = slotIndex - 1;
-        int currentNonLocalIndex = 0;
         for (int i = 0; i < currentRoom.players.Count; i++)
         {
             PlayerState candidate = currentRoom.players[i];
-            if (candidate == null || AreSamePlayer(candidate, localPlayer))
+            if (candidate == null)
             {
                 continue;
             }
 
-            if (currentNonLocalIndex == targetNonLocalIndex)
+            if (localPlayer != null && AreSamePlayer(candidate, localPlayer))
             {
-                return candidate;
+                continue;
             }
 
-            currentNonLocalIndex++;
+            slotPlayers.Add(candidate);
+            if (slotPlayers.Count >= maxSlots)
+            {
+                break;
+            }
         }
 
-        return null;
+        return slotPlayers;
     }
 
     private static bool AreSamePlayer(PlayerState first, PlayerState second)
