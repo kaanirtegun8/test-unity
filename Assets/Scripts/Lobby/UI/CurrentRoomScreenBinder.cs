@@ -44,6 +44,9 @@ public class CurrentRoomScreenBinder : MonoBehaviour
     [SerializeField] private Color lockedStateButtonTint = new Color(0.52f, 0.56f, 0.62f, 0.75f);
     [SerializeField] private string copyTooltipMessage = "Copied";
     [SerializeField] private float copyTooltipDuration = 1.2f;
+    [SerializeField] private Vector2 copyTooltipSize = new Vector2(120f, 34f);
+    [SerializeField] private Color copyTooltipBackgroundColor = new Color(0.19f, 0.70f, 0.29f, 0.96f);
+    [SerializeField] private Color copyTooltipTextColor = Color.white;
 
     private GameObject copyTooltipObject;
     private TMP_Text copyTooltipText;
@@ -577,11 +580,23 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         tooltipRect.anchorMax = new Vector2(1f, 0.5f);
         tooltipRect.pivot = new Vector2(0f, 0.5f);
         tooltipRect.anchoredPosition = new Vector2(10f, 0f);
-        tooltipRect.sizeDelta = new Vector2(78f, 26f);
+        tooltipRect.sizeDelta = copyTooltipSize;
 
         Image tooltipBackground = tooltipRoot.GetComponent<Image>();
-        tooltipBackground.color = new Color(0.08f, 0.14f, 0.28f, 0.95f);
+        tooltipBackground.color = copyTooltipBackgroundColor;
         tooltipBackground.raycastTarget = false;
+        tooltipBackground.type = Image.Type.Sliced;
+
+        Image copyButtonImage = copyRoomIdButton.GetComponent<Image>();
+        if (copyButtonImage != null && copyButtonImage.sprite != null)
+        {
+            tooltipBackground.sprite = copyButtonImage.sprite;
+        }
+
+        Shadow backgroundShadow = tooltipRoot.AddComponent<Shadow>();
+        backgroundShadow.effectColor = new Color(0f, 0f, 0f, 0.35f);
+        backgroundShadow.effectDistance = new Vector2(1.5f, -1.5f);
+        backgroundShadow.useGraphicAlpha = true;
 
         GameObject labelObject = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
         labelObject.transform.SetParent(tooltipRoot.transform, false);
@@ -596,12 +611,19 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         label.alignment = TextAlignmentOptions.Center;
         label.text = copyTooltipMessage;
         label.fontSize = roomIdText != null ? roomIdText.fontSize : 14f;
-        label.color = Color.white;
+        label.color = copyTooltipTextColor;
         label.raycastTarget = false;
+        label.enableWordWrapping = false;
+        label.overflowMode = TextOverflowModes.Overflow;
         if (roomIdText != null && roomIdText.font != null)
         {
             label.font = roomIdText.font;
         }
+
+        Outline labelOutline = labelObject.AddComponent<Outline>();
+        labelOutline.effectColor = new Color(0f, 0f, 0f, 0.35f);
+        labelOutline.effectDistance = new Vector2(1f, -1f);
+        labelOutline.useGraphicAlpha = true;
 
         tooltipRoot.SetActive(false);
         copyTooltipObject = tooltipRoot;
