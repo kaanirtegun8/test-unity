@@ -35,7 +35,17 @@ public class LobbyStateStore
             maxPlayers = CurrentDraft.maxPlayers,
             selectedMapIndex = CurrentDraft.selectedMapIndex,
             treasureCount = CurrentDraft.treasureCount,
-            players = new List<PlayerState>()
+            players = new List<PlayerState>
+            {
+                new PlayerState
+                {
+                    playerId = "local_player",
+                    displayName = "You",
+                    isReady = false,
+                    isHost = true,
+                    selectedColorIndex = 0
+                }
+            }
         };
     }
 

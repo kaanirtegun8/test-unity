@@ -4,13 +4,28 @@ using UnityEngine.UI;
 
 public class CurrentRoomScreenBinder : MonoBehaviour
 {
+    private const int DefaultSlotCount = 4;
+
+    private enum SlotVisualState
+    {
+        Occupied,
+        Available,
+        Locked
+    }
+
     [SerializeField] private TMP_Text roomNameText;
     [SerializeField] private TMP_Text roomIdText;
     [SerializeField] private TMP_Text roomPlayerCountText;
     [SerializeField] private TMP_Text sidePlayerCountText;
     [SerializeField] private TMP_Text sideRewardText;
     [SerializeField] private Image sideMapPreview;
+    [SerializeField] private GameObject[] playerSlots = new GameObject[DefaultSlotCount];
     [SerializeField] [Range(0f, 1f)] private float sideMapPreviewAlpha = 1f;
+    [SerializeField] private string occupiedSlotStatusText = "Waiting...";
+    [SerializeField] private string availableSlotStatusText = "Available";
+    [SerializeField] private string lockedSlotStatusText = "Locked";
+    [SerializeField] [Range(0f, 1f)] private float availableSlotAlpha = 0.82f;
+    [SerializeField] [Range(0f, 1f)] private float lockedSlotAlpha = 0.42f;
 
     private static readonly Color[] SideMapPreviewPalette =
     {
@@ -57,9 +72,13 @@ public class CurrentRoomScreenBinder : MonoBehaviour
 
         string safeRoomName = string.IsNullOrWhiteSpace(currentRoom.roomName) ? "Fun Match" : currentRoom.roomName;
         string safeRoomId = string.IsNullOrWhiteSpace(currentRoom.roomId) ? "000000" : currentRoom.roomId;
-        int safeMaxPlayers = Mathf.Max(1, currentRoom.maxPlayers);
+        int safeMaxPlayers = Mathf.Clamp(
+            currentRoom.maxPlayers,
+            1,
+            Mathf.Max(1, playerSlots != null ? playerSlots.Length : DefaultSlotCount));
         int safeTreasureCount = Mathf.Max(0, currentRoom.treasureCount);
         int playerCount = currentRoom.players != null ? currentRoom.players.Count : 0;
+        int safePlayerCount = Mathf.Clamp(playerCount, 0, safeMaxPlayers);
 
         if (roomNameText != null)
         {
@@ -73,12 +92,12 @@ public class CurrentRoomScreenBinder : MonoBehaviour
 
         if (roomPlayerCountText != null)
         {
-            roomPlayerCountText.text = $"Players: {playerCount}/{safeMaxPlayers}";
+            roomPlayerCountText.text = $"Players: {safePlayerCount}/{safeMaxPlayers}";
         }
 
         if (sidePlayerCountText != null)
         {
-            sidePlayerCountText.text = safeMaxPlayers.ToString();
+            sidePlayerCountText.text = safePlayerCount.ToString();
         }
 
         if (sideRewardText != null)
@@ -86,6 +105,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             sideRewardText.text = $"x{safeTreasureCount}";
         }
 
+        ApplyPlayerSlotsVisuals(safePlayerCount, safeMaxPlayers);
         ApplySideMapPreviewVisual(currentRoom.selectedMapIndex);
     }
 
@@ -108,7 +128,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
 
         if (sidePlayerCountText != null)
         {
-            sidePlayerCountText.text = "4";
+            sidePlayerCountText.text = "0";
         }
 
         if (sideRewardText != null)
@@ -116,7 +136,124 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             sideRewardText.text = "x2";
         }
 
+        ApplyPlayerSlotsVisuals(0, DefaultSlotCount);
         ApplySideMapPreviewVisual(0);
+    }
+
+    private void ApplyPlayerSlotsVisuals(int playerCount, int maxPlayers)
+    {
+        if (playerSlots == null || playerSlots.Length == 0)
+        {
+            return;
+        }
+
+        int safeMaxPlayers = Mathf.Clamp(maxPlayers, 0, playerSlots.Length);
+        int safePlayerCount = Mathf.Clamp(playerCount, 0, safeMaxPlayers);
+
+        for (int i = 0; i < playerSlots.Length; i++)
+        {
+            GameObject slot = playerSlots[i];
+            if (slot == null)
+            {
+                continue;
+            }
+
+            if (i < safePlayerCount)
+            {
+                ApplySlotVisualState(slot, SlotVisualState.Occupied);
+            }
+            else if (i < safeMaxPlayers)
+            {
+                ApplySlotVisualState(slot, SlotVisualState.Available);
+            }
+            else
+            {
+                ApplySlotVisualState(slot, SlotVisualState.Locked);
+            }
+        }
+    }
+
+    private void ApplySlotVisualState(GameObject slot, SlotVisualState state)
+    {
+        if (slot == null)
+        {
+            return;
+        }
+
+        Image slotBackground = slot.GetComponent<Image>();
+        Transform avatarTransform = slot.transform.Find("AvatarPlaceholder");
+        Image avatarImage = avatarTransform != null ? avatarTransform.GetComponent<Image>() : null;
+        Transform statusTransform = slot.transform.Find("StatusButton");
+        Button statusButton = statusTransform != null ? statusTransform.GetComponent<Button>() : null;
+        Image statusButtonImage = statusTransform != null ? statusTransform.GetComponent<Image>() : null;
+        TMP_Text statusText = null;
+        if (statusTransform != null)
+        {
+            Transform labelTransform = statusTransform.Find("Label");
+            if (labelTransform != null)
+            {
+                statusText = labelTransform.GetComponent<TMP_Text>();
+            }
+        }
+
+        switch (state)
+        {
+            case SlotVisualState.Occupied:
+                SetGraphicAlpha(slotBackground, 1f);
+                SetGraphicAlpha(avatarImage, 1f);
+                SetGraphicAlpha(statusButtonImage, 1f);
+                SetText(statusText, occupiedSlotStatusText, 1f);
+                if (statusButton != null)
+                {
+                    statusButton.interactable = false;
+                }
+                break;
+            case SlotVisualState.Available:
+                SetGraphicAlpha(slotBackground, availableSlotAlpha);
+                SetGraphicAlpha(avatarImage, availableSlotAlpha);
+                SetGraphicAlpha(statusButtonImage, availableSlotAlpha);
+                SetText(statusText, availableSlotStatusText, availableSlotAlpha);
+                if (statusButton != null)
+                {
+                    statusButton.interactable = false;
+                }
+                break;
+            default:
+                SetGraphicAlpha(slotBackground, lockedSlotAlpha);
+                SetGraphicAlpha(avatarImage, lockedSlotAlpha);
+                SetGraphicAlpha(statusButtonImage, lockedSlotAlpha);
+                SetText(statusText, lockedSlotStatusText, lockedSlotAlpha);
+                if (statusButton != null)
+                {
+                    statusButton.interactable = false;
+                }
+                break;
+        }
+    }
+
+    private static void SetText(TMP_Text text, string value, float alpha)
+    {
+        if (text == null)
+        {
+            return;
+        }
+
+        text.text = value;
+        Color color = text.color;
+        color.a = Mathf.Clamp01(alpha);
+        text.color = color;
+    }
+
+    private static void SetGraphicAlpha(Graphic graphic, float alpha)
+    {
+        if (graphic == null)
+        {
+            return;
+        }
+
+        Color color = graphic.color;
+        color.a = Mathf.Clamp01(alpha);
+        graphic.color = color;
     }
 
     private void ApplySideMapPreviewVisual(int selectedMapIndex)
@@ -135,6 +272,11 @@ public class CurrentRoomScreenBinder : MonoBehaviour
     private void AutoAssignReferences()
     {
         Transform[] allTransforms = transform.GetComponentsInChildren<Transform>(true);
+
+        if (playerSlots == null || playerSlots.Length != DefaultSlotCount)
+        {
+            playerSlots = new GameObject[DefaultSlotCount];
+        }
 
         if (roomNameText == null)
         {
@@ -165,6 +307,26 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         {
             sideMapPreview = FindImageByName(allTransforms, "SideMapPreview");
         }
+
+        AssignSlotByName(allTransforms, "PlayerSlot01", 0);
+        AssignSlotByName(allTransforms, "PlayerSlot02", 1);
+        AssignSlotByName(allTransforms, "PlayerSlot03", 2);
+        AssignSlotByName(allTransforms, "PlayerSlot04", 3);
+    }
+
+    private void AssignSlotByName(Transform[] allTransforms, string slotName, int index)
+    {
+        if (playerSlots == null || index < 0 || index >= playerSlots.Length)
+        {
+            return;
+        }
+
+        if (playerSlots[index] != null)
+        {
+            return;
+        }
+
+        playerSlots[index] = FindGameObjectByName(allTransforms, slotName);
     }
 
     private static TMP_Text FindTextByName(Transform[] allTransforms, string targetName)
@@ -187,6 +349,19 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             if (allTransforms[i].name == targetName)
             {
                 return allTransforms[i].GetComponent<Image>();
+            }
+        }
+
+        return null;
+    }
+
+    private static GameObject FindGameObjectByName(Transform[] allTransforms, string targetName)
+    {
+        for (int i = 0; i < allTransforms.Length; i++)
+        {
+            if (allTransforms[i].name == targetName)
+            {
+                return allTransforms[i].gameObject;
             }
         }
 
