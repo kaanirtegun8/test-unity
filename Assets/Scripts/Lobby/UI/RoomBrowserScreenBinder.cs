@@ -196,7 +196,18 @@ public class RoomBrowserScreenBinder : MonoBehaviour
             string safeRoomName = roomState != null && !string.IsNullOrWhiteSpace(roomState.roomName)
                 ? roomState.roomName
                 : $"Room {rowIndex + 1}";
+            roomNameText.enableWordWrapping = false;
+            roomNameText.overflowMode = TextOverflowModes.Ellipsis;
             roomNameText.text = safeRoomName;
+        }
+
+        TMP_Text roomIdText = FindTextByName(itemObject.transform, "RoomIdText");
+        if (roomIdText != null)
+        {
+            string safeRoomId = roomState != null && !string.IsNullOrWhiteSpace(roomState.roomId)
+                ? roomState.roomId
+                : "000000";
+            roomIdText.text = $"ID: {safeRoomId}";
         }
 
         Button joinButton = FindButtonByName(itemObject.transform, "JoinButton");
