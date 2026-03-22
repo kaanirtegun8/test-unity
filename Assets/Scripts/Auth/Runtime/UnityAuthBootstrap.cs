@@ -9,7 +9,7 @@ public class UnityAuthBootstrap : MonoBehaviour
     [SerializeField] private bool signInOnStart = true;
     [SerializeField] private string fallbackDisplayName = "Player";
 
-    private readonly AuthStateStore authStateStore = new AuthStateStore();
+    private readonly AuthStateStore authStateStore = AuthStateStore.Local;
     private bool isSignInInProgress;
 
     private async void Start()

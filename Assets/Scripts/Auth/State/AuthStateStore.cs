@@ -2,6 +2,8 @@ using System;
 
 public class AuthStateStore
 {
+    public static AuthStateStore Local { get; } = new AuthStateStore();
+
     public bool IsAuthenticated { get; private set; }
     public AuthUser CurrentUser { get; private set; }
 
