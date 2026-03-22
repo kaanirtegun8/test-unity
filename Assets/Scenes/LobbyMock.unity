@@ -2780,6 +2780,8 @@ MonoBehaviour:
   unselectedMapAlpha: 0.56
   switchOnColor: {r: 1, g: 1, b: 1, a: 1}
   switchOffColor: {r: 0.7, g: 0.75, b: 0.85, a: 1}
+  selectedMapSprite: {fileID: 0}
+  unselectedMapSprite: {fileID: 0}
 --- !u!1 &440455898
 GameObject:
   m_ObjectHideFlags: 0
@@ -12093,7 +12095,6 @@ GameObject:
   - component: {fileID: 2138068720}
   - component: {fileID: 2138068722}
   - component: {fileID: 2138068721}
-  - component: {fileID: 2138068723}
   m_Layer: 0
   m_Name: MapItem03
   m_TagString: Untagged
@@ -12158,21 +12159,6 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2138068719}
   m_CullTransparentMesh: 1
---- !u!114 &2138068723
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2138068719}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: e19747de3f5aca642ab2be37e372fb86, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Outline
-  m_EffectColor: {r: 0.76, g: 0.97, b: 0.46, a: 1}
-  m_EffectDistance: {x: 4, y: -4}
-  m_UseGraphicAlpha: 0
 --- !u!1001 &2140272328
 PrefabInstance:
   m_ObjectHideFlags: 0

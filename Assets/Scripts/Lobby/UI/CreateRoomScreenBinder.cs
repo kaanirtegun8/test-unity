@@ -28,6 +28,8 @@ public class CreateRoomScreenBinder : MonoBehaviour
     [SerializeField] [Range(0f, 1f)] private float unselectedMapAlpha = 0.56f;
     [SerializeField] private Color switchOnColor = Color.white;
     [SerializeField] private Color switchOffColor = new Color(0.7f, 0.75f, 0.85f, 1f);
+    [SerializeField] private Sprite selectedMapSprite;
+    [SerializeField] private Sprite unselectedMapSprite;
 
     private readonly Button[] mapItemButtons = new Button[MapItemCount];
     private readonly Image[] mapItemImages = new Image[MapItemCount];
@@ -402,6 +404,16 @@ public class CreateRoomScreenBinder : MonoBehaviour
             }
 
             bool isSelected = i == selectedIndex;
+            Sprite targetSprite = isSelected ? selectedMapSprite : unselectedMapSprite;
+            if (targetSprite != null)
+            {
+                mapImage.sprite = targetSprite;
+                mapImage.overrideSprite = targetSprite;
+            }
+
+            // Remove per-item material/style differences so only selectedMapIndex drives visuals.
+            mapImage.material = null;
+
             Color color = mapImage.color;
             color.a = isSelected ? selectedAlpha : unselectedAlpha;
             mapImage.color = color;
@@ -547,6 +559,56 @@ public class CreateRoomScreenBinder : MonoBehaviour
             Vector2 knobPositions = CalculateKnobPositions();
             publicKnobPosition = new Vector2(knobPositions.x, toggleKnob.anchoredPosition.y);
             privateKnobPosition = new Vector2(knobPositions.y, toggleKnob.anchoredPosition.y);
+        }
+
+        CacheMapVisualPresets();
+    }
+
+    private void CacheMapVisualPresets()
+    {
+        if (unselectedMapSprite == null)
+        {
+            if (mapItemImages[0] != null && mapItemImages[0].sprite != null)
+            {
+                unselectedMapSprite = mapItemImages[0].sprite;
+            }
+            else
+            {
+                for (int i = 0; i < MapItemCount; i++)
+                {
+                    if (mapItemImages[i] != null && mapItemImages[i].sprite != null)
+                    {
+                        unselectedMapSprite = mapItemImages[i].sprite;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (selectedMapSprite == null)
+        {
+            if (mapItemImages.Length > 2 && mapItemImages[2] != null && mapItemImages[2].sprite != null)
+            {
+                selectedMapSprite = mapItemImages[2].sprite;
+            }
+            else
+            {
+                for (int i = 0; i < MapItemCount; i++)
+                {
+                    if (mapItemImages[i] != null &&
+                        mapItemImages[i].sprite != null &&
+                        mapItemImages[i].sprite != unselectedMapSprite)
+                    {
+                        selectedMapSprite = mapItemImages[i].sprite;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (selectedMapSprite == null)
+        {
+            selectedMapSprite = unselectedMapSprite;
         }
     }
 
