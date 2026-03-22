@@ -180,6 +180,8 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
 
     public void ShowCurrentRoom()
     {
+        LobbyStateStore.Local.CreateRoomFromDraft();
+
         if (createRoomScreen != null)
         {
             createRoomScreen.SetActive(false);

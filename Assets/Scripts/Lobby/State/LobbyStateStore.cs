@@ -3,6 +3,8 @@ using System.Collections.Generic;
 
 public class LobbyStateStore
 {
+    public static LobbyStateStore Local { get; } = new LobbyStateStore();
+
     private readonly Random roomIdRandom = new Random();
 
     public RoomDraft CurrentDraft { get; private set; }
