@@ -6,6 +6,10 @@ using UnityEngine.UI;
 public class RoomBrowserScreenBinder : MonoBehaviour
 {
     private const string RuntimeItemNamePrefix = "RuntimeRoomItem_";
+    private static readonly Vector2 RoomNameAnchoredPosition = new Vector2(304f, 14f);
+    private static readonly Vector2 RoomNameSize = new Vector2(560f, 46f);
+    private static readonly Vector2 RoomIdAnchoredPosition = new Vector2(304f, -16f);
+    private static readonly Vector2 RoomIdSize = new Vector2(420f, 34f);
 
     [SerializeField] private RectTransform contentRoot;
     [SerializeField] private GameObject roomListItemPrefab;
@@ -27,7 +31,7 @@ public class RoomBrowserScreenBinder : MonoBehaviour
 
     private void OnEnable()
     {
-        if (refreshOnEnable)
+        if (refreshOnEnable || SharedStore.Rooms.Count > 0)
         {
             RefreshRoomList();
         }
@@ -196,17 +200,22 @@ public class RoomBrowserScreenBinder : MonoBehaviour
             string safeRoomName = roomState != null && !string.IsNullOrWhiteSpace(roomState.roomName)
                 ? roomState.roomName
                 : $"Room {rowIndex + 1}";
-            roomNameText.enableWordWrapping = false;
-            roomNameText.overflowMode = TextOverflowModes.Ellipsis;
+            ApplyRoomNameVisual(roomNameText);
             roomNameText.text = safeRoomName;
         }
 
         TMP_Text roomIdText = FindTextByName(itemObject.transform, "RoomIdText");
+        if (roomIdText == null)
+        {
+            roomIdText = CreateRoomIdText(itemObject.transform, roomNameText);
+        }
+
         if (roomIdText != null)
         {
             string safeRoomId = roomState != null && !string.IsNullOrWhiteSpace(roomState.roomId)
                 ? roomState.roomId
-                : "000000";
+                : (456790 + rowIndex).ToString();
+            ApplyRoomIdVisual(roomIdText);
             roomIdText.text = $"ID: {safeRoomId}";
         }
 
@@ -281,5 +290,69 @@ public class RoomBrowserScreenBinder : MonoBehaviour
         }
 
         return null;
+    }
+
+    private static void ApplyRoomNameVisual(TMP_Text roomNameText)
+    {
+        if (roomNameText == null)
+        {
+            return;
+        }
+
+        RectTransform rect = roomNameText.rectTransform;
+        rect.anchorMin = new Vector2(0f, 0.5f);
+        rect.anchorMax = new Vector2(0f, 0.5f);
+        rect.pivot = new Vector2(0f, 0.5f);
+        rect.anchoredPosition = RoomNameAnchoredPosition;
+        rect.sizeDelta = RoomNameSize;
+
+        roomNameText.enableWordWrapping = false;
+        roomNameText.overflowMode = TextOverflowModes.Ellipsis;
+        roomNameText.alignment = TextAlignmentOptions.Left;
+        roomNameText.fontStyle = FontStyles.Bold;
+        roomNameText.fontSize = 32f;
+        roomNameText.color = Color.white;
+    }
+
+    private static void ApplyRoomIdVisual(TMP_Text roomIdText)
+    {
+        if (roomIdText == null)
+        {
+            return;
+        }
+
+        RectTransform rect = roomIdText.rectTransform;
+        rect.anchorMin = new Vector2(0f, 0.5f);
+        rect.anchorMax = new Vector2(0f, 0.5f);
+        rect.pivot = new Vector2(0f, 0.5f);
+        rect.anchoredPosition = RoomIdAnchoredPosition;
+        rect.sizeDelta = RoomIdSize;
+
+        roomIdText.enableWordWrapping = false;
+        roomIdText.overflowMode = TextOverflowModes.Ellipsis;
+        roomIdText.alignment = TextAlignmentOptions.Left;
+        roomIdText.fontStyle = FontStyles.Normal;
+        roomIdText.fontSize = 22f;
+        roomIdText.color = new Color(0.92f, 0.96f, 1f, 1f);
+    }
+
+    private static TMP_Text CreateRoomIdText(Transform itemRoot, TMP_Text roomNameReference)
+    {
+        if (itemRoot == null)
+        {
+            return null;
+        }
+
+        GameObject roomIdObject = new GameObject("RoomIdText", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+        roomIdObject.transform.SetParent(itemRoot, false);
+
+        TextMeshProUGUI roomIdText = roomIdObject.GetComponent<TextMeshProUGUI>();
+        if (roomNameReference != null && roomNameReference.font != null)
+        {
+            roomIdText.font = roomNameReference.font;
+        }
+
+        ApplyRoomIdVisual(roomIdText);
+        return roomIdText;
     }
 }

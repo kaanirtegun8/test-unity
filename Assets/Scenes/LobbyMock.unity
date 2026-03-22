@@ -4691,6 +4691,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 783770500}
+  - component: {fileID: 783770501}
   m_Layer: 0
   m_Name: RoomBrowserScreen
   m_TagString: Untagged
@@ -4718,6 +4719,26 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
+--- !u!114 &783770501
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 783770499}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ce1473965b55744b886b7e5dd4c67113, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::RoomBrowserScreenBinder
+  contentRoot: {fileID: 1632648743}
+  roomListItemPrefab: {fileID: 1691894367}
+  createRoomButton: {fileID: 193067320}
+  refreshButton: {fileID: 1881060229}
+  filterRoomsButton: {fileID: 2142087502}
+  refreshOnEnable: 1
+  hideTemplateItemOnRuntime: 1
+  logRefreshInfo: 1
 --- !u!1 &807437691
 GameObject:
   m_ObjectHideFlags: 0
@@ -9671,6 +9692,11 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1685667156}
   m_CullTransparentMesh: 1
+--- !u!1 &1691894367 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 4488175946338895124, guid: db5a5ce29b5514f43bba37bf2c81f8ac, type: 3}
+  m_PrefabInstance: {fileID: 47826965}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &1694064102
 GameObject:
   m_ObjectHideFlags: 0
