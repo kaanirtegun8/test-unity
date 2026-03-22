@@ -14,16 +14,18 @@ public class RoomBrowserScreenBinder : MonoBehaviour
     private const float RowSpacing = 14f;
     private const float RowHorizontalPadding = -8f;
 
-    private static readonly Vector2 MapAnchoredPosition = new Vector2(230f, 0f);
+    private static readonly Vector2 MapAnchoredPosition = new Vector2(300f, 0f);
     private static readonly Vector2 MapSize = new Vector2(230f, 132f);
-    private static readonly Vector2 RoomNameAnchoredPosition = new Vector2(500f, 0f);
+    private static readonly Vector2 RoomNameAnchoredPosition = new Vector2(620f, 0f);
     private static readonly Vector2 RoomNameSize = new Vector2(510f, 56f);
+    private static readonly Vector2 PlayerCountAnchoredPosition = new Vector2(1080f, 0f);
+    private static readonly Vector2 PlayerCountSize = new Vector2(140f, 84f);
     private static readonly Vector2 RoomIdButtonAnchoredPosition = new Vector2(28f, 0f);
     private static readonly Vector2 RoomIdButtonSize = new Vector2(244f, 74f);
     private static readonly Vector2 RoomIdTextAnchoredPosition = new Vector2(28f, 0f);
     private static readonly Vector2 RoomIdTextSize = new Vector2(186f, 44f);
     private static readonly Vector2 RoomIdIconAnchoredPosition = new Vector2(30f, 0f);
-    private static readonly Vector2 RoomIdIconSize = new Vector2(26f, 26f);
+    private static readonly Vector2 RoomIdIconSize = new Vector2(34f, 34f);
 
 #if UNITY_EDITOR
     private const string RoomIdButtonSpritePath = "Assets/Simple Buttons/Big Buttons/BigBlue.png";
@@ -224,6 +226,7 @@ public class RoomBrowserScreenBinder : MonoBehaviour
         TMP_Text playerCountText = FindTextByName(itemObject.transform, "PlayerCountText");
         if (playerCountText != null)
         {
+            ApplyPlayerCountVisual(playerCountText);
             playerCountText.text = $"{playerCount}/{maxPlayers}";
         }
 
@@ -373,6 +376,23 @@ public class RoomBrowserScreenBinder : MonoBehaviour
         roomNameText.fontStyle = FontStyles.Bold;
         roomNameText.fontSize = 32f;
         roomNameText.color = Color.white;
+    }
+
+    private static void ApplyPlayerCountVisual(TMP_Text playerCountText)
+    {
+        if (playerCountText == null)
+        {
+            return;
+        }
+
+        RectTransform rect = playerCountText.rectTransform;
+        rect.anchorMin = new Vector2(0f, 0.5f);
+        rect.anchorMax = new Vector2(0f, 0.5f);
+        rect.pivot = new Vector2(0f, 0.5f);
+        rect.anchoredPosition = PlayerCountAnchoredPosition;
+        rect.sizeDelta = PlayerCountSize;
+
+        playerCountText.alignment = TextAlignmentOptions.MidlineLeft;
     }
 
     private static void ApplyRoomIdTextVisual(TMP_Text roomIdText)
