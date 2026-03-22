@@ -46,8 +46,8 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
 
         if (leaveButton != null)
         {
-            leaveButton.onClick.RemoveListener(ShowRoomBrowser);
-            leaveButton.onClick.AddListener(ShowRoomBrowser);
+            leaveButton.onClick.RemoveListener(OnLeaveButtonClicked);
+            leaveButton.onClick.AddListener(OnLeaveButtonClicked);
         }
     }
 
@@ -70,7 +70,7 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
 
         if (leaveButton != null)
         {
-            leaveButton.onClick.RemoveListener(ShowRoomBrowser);
+            leaveButton.onClick.RemoveListener(OnLeaveButtonClicked);
         }
     }
 
@@ -212,5 +212,11 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
         {
             currentRoomScreen.SetActive(true);
         }
+    }
+
+    private void OnLeaveButtonClicked()
+    {
+        LobbyStateStore.Local.LeaveCurrentRoomAsLocalPlayer();
+        ShowRoomBrowser();
     }
 }

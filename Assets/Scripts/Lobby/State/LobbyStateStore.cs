@@ -77,6 +77,93 @@ public class LobbyStateStore
         CurrentRoom = room;
     }
 
+    public void LeaveCurrentRoomAsLocalPlayer()
+    {
+        RoomState room = CurrentRoom;
+        if (room != null && room.players != null && LocalPlayer != null)
+        {
+            string localPlayerId = LocalPlayer.playerId != null ? LocalPlayer.playerId.Trim() : string.Empty;
+            if (!string.IsNullOrWhiteSpace(localPlayerId))
+            {
+                for (int i = room.players.Count - 1; i >= 0; i--)
+                {
+                    PlayerState player = room.players[i];
+                    string playerId = player != null && player.playerId != null ? player.playerId.Trim() : string.Empty;
+                    if (string.Equals(playerId, localPlayerId, StringComparison.Ordinal))
+                    {
+                        room.players.RemoveAt(i);
+                    }
+                }
+            }
+        }
+
+        ClearCurrentRoom();
+    }
+
+    public bool TryJoinRoom(RoomState room)
+    {
+        if (room == null)
+        {
+            return false;
+        }
+
+        CurrentRoom = room;
+        InitializeLocalPlayer();
+
+        if (room.players == null)
+        {
+            room.players = new List<PlayerState>();
+        }
+
+        if (LocalPlayer == null)
+        {
+            return true;
+        }
+
+        string localPlayerId = LocalPlayer.playerId != null ? LocalPlayer.playerId.Trim() : string.Empty;
+        if (string.IsNullOrWhiteSpace(localPlayerId))
+        {
+            LocalPlayer.EnsureDefaults();
+            localPlayerId = LocalPlayer.playerId != null ? LocalPlayer.playerId.Trim() : string.Empty;
+            if (string.IsNullOrWhiteSpace(localPlayerId))
+            {
+                return true;
+            }
+        }
+
+        for (int i = 0; i < room.players.Count; i++)
+        {
+            PlayerState existingPlayer = room.players[i];
+            if (existingPlayer == null)
+            {
+                continue;
+            }
+
+            string existingPlayerId = existingPlayer.playerId != null ? existingPlayer.playerId.Trim() : string.Empty;
+            if (string.Equals(existingPlayerId, localPlayerId, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        int maxPlayers = Math.Max(1, room.maxPlayers);
+        if (room.players.Count >= maxPlayers)
+        {
+            return false;
+        }
+
+        room.players.Add(new PlayerState
+        {
+            playerId = localPlayerId,
+            displayName = LocalPlayer.displayName,
+            selectedColorIndex = LocalPlayer.selectedColorIndex,
+            isHost = false,
+            isReady = false
+        });
+
+        return true;
+    }
+
     public void SetLocalDisplayName(string value)
     {
         InitializeLocalPlayer();

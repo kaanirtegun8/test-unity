@@ -272,14 +272,12 @@ public class RoomBrowserScreenBinder : MonoBehaviour
             return;
         }
 
-        int playerCount = selectedRoom.players != null ? selectedRoom.players.Count : 0;
-        int maxPlayers = Mathf.Max(1, selectedRoom.maxPlayers);
-        if (playerCount >= maxPlayers)
+        bool joinedOrAlreadyMember = SharedStore.TryJoinRoom(selectedRoom);
+        if (!joinedOrAlreadyMember)
         {
             return;
         }
 
-        SharedStore.SetCurrentRoom(selectedRoom);
         AutoAssignReferences();
 
         if (createRoomScreen != null)
