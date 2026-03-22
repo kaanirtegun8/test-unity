@@ -6,6 +6,7 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
     [SerializeField] private GameObject roomBrowserScreen;
     [SerializeField] private GameObject createRoomScreen;
     [SerializeField] private GameObject currentRoomScreen;
+    [SerializeField] private RoomBrowserScreenBinder roomBrowserScreenBinder;
     [SerializeField] private Button createRoomButton;
     [SerializeField] private Button createButton;
     [SerializeField] private Button backButton;
@@ -92,6 +93,11 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
             currentRoomScreen = FindGameObjectByName(allTransforms, "CurrentRoomScreen");
         }
 
+        if (roomBrowserScreenBinder == null && roomBrowserScreen != null)
+        {
+            roomBrowserScreenBinder = roomBrowserScreen.GetComponentInChildren<RoomBrowserScreenBinder>(true);
+        }
+
         if (createRoomButton == null)
         {
             GameObject createButtonObject = FindGameObjectByName(allTransforms, "CreateRoomButton");
@@ -157,6 +163,16 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
         if (currentRoomScreen != null)
         {
             currentRoomScreen.SetActive(false);
+        }
+
+        if (roomBrowserScreenBinder == null && roomBrowserScreen != null)
+        {
+            roomBrowserScreenBinder = roomBrowserScreen.GetComponentInChildren<RoomBrowserScreenBinder>(true);
+        }
+
+        if (roomBrowserScreenBinder != null)
+        {
+            roomBrowserScreenBinder.RefreshRoomList();
         }
     }
 
