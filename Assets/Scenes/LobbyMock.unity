@@ -2524,6 +2524,7 @@ MonoBehaviour:
   roomBrowserScreen: {fileID: 0}
   createRoomScreen: {fileID: 0}
   currentRoomScreen: {fileID: 0}
+  roomBrowserScreenBinder: {fileID: 0}
   createRoomButton: {fileID: 0}
   createButton: {fileID: 0}
   backButton: {fileID: 0}
@@ -4074,6 +4075,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::RoomBrowserScreenBinder
   contentRoot: {fileID: 1632648743}
   roomListItemPrefab: {fileID: 4488175946338895124, guid: db5a5ce29b5514f43bba37bf2c81f8ac, type: 3}
+  roomBrowserScreen: {fileID: 783770499}
+  createRoomScreen: {fileID: 431151045}
+  currentRoomScreen: {fileID: 1623643594}
   createRoomButton: {fileID: 193067320}
   refreshButton: {fileID: 1881060229}
   filterRoomsButton: {fileID: 2142087502}
@@ -6789,6 +6793,52 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1405276535}
   m_CullTransparentMesh: 1
+--- !u!1 &1405901603
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1405901605}
+  - component: {fileID: 1405901604}
+  m_Layer: 0
+  m_Name: AuthBootstrap
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1405901604
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1405901603}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 46924706bfb114242af534dfdb680490, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::UnityAuthBootstrap
+  signInOnStart: 1
+  fallbackDisplayName: AuthTest123
+--- !u!4 &1405901605
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1405901603}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1410788740
 GameObject:
   m_ObjectHideFlags: 0
@@ -7988,6 +8038,8 @@ MonoBehaviour:
   roomIdText: {fileID: 1694064104}
   copyRoomIdButton: {fileID: 1603325845}
   startGameButton: {fileID: 1300028109}
+  startGameButtonImage: {fileID: 1300028110}
+  startGameButtonText: {fileID: 734963404}
   roomPlayerCountText: {fileID: 333129247}
   sidePlayerCountText: {fileID: 507093800}
   sideRewardText: {fileID: 1531439555}
@@ -8000,6 +8052,8 @@ MonoBehaviour:
   playerSlot01StatusButton: {fileID: 1404672973}
   playerSlot01StatusButtonImage: {fileID: 1404672974}
   playerSlot01StatusText: {fileID: 1038767318}
+  playerSlot01NameText: {fileID: 0}
+  playerSlot01HostBadgeText: {fileID: 0}
   hostReadyButtonSprite: {fileID: 21300000, guid: 7194b907763190b4ab82436aaba93472, type: 3}
   hostNotReadyButtonSprite: {fileID: 21300000, guid: 72c72df40bd317b44ab2c02d03f268c7, type: 3}
   sideMapPreviewAlpha: 1
@@ -8016,6 +8070,14 @@ MonoBehaviour:
   hostNotReadyButtonTint: {r: 0.62, g: 0.66, b: 0.73, a: 0.95}
   emptyStateButtonTint: {r: 0.62, g: 0.66, b: 0.73, a: 0.85}
   lockedStateButtonTint: {r: 0.52, g: 0.56, b: 0.62, a: 0.75}
+  startGameEnabledTint: {r: 1, g: 1, b: 1, a: 1}
+  startGameDisabledTint: {r: 0.52, g: 0.56, b: 0.62, a: 0.92}
+  startGameEnabledTextColor: {r: 1, g: 1, b: 1, a: 1}
+  startGameDisabledTextColor: {r: 0.84, g: 0.88, b: 0.94, a: 0.95}
+  localPlayerFallbackName: You
+  localPlayerHostBadgeLabel: Host
+  localPlayerNameColor: {r: 1, g: 1, b: 1, a: 1}
+  localPlayerHostBadgeColor: {r: 0.77, g: 0.92, b: 0.56, a: 1}
   copyTooltipMessage: Copied
   copyTooltipDuration: 1.2
   copyTooltipSize: {x: 120, y: 34}
@@ -11162,3 +11224,4 @@ SceneRoots:
   - {fileID: 1050109069}
   - {fileID: 1266114871}
   - {fileID: 1944424403}
+  - {fileID: 1405901605}
