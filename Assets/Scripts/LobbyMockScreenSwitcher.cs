@@ -235,7 +235,7 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
                     Lobby createdLobby = await TryCreateLobbyFromDraftAsync(draft);
                     if (createdLobby != null)
                     {
-                        ApplyCreatedLobbyToStore(store, createdLobby, draft);
+                        ApplyCreatedLobbyToStore(store, createdLobby);
                         shouldOpenCurrentRoomScreen = true;
                     }
                     else
@@ -310,52 +310,41 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
         }
     }
 
-    private static void ApplyCreatedLobbyToStore(LobbyStateStore store, Lobby createdLobby, RoomDraft draft)
+    private void ApplyCreatedLobbyToStore(LobbyStateStore store, Lobby createdLobby)
     {
         if (store == null || createdLobby == null)
         {
             return;
         }
 
-        int safeMaxPlayers = Mathf.Max(1, createdLobby.MaxPlayers);
-        string lobbyRoomName = !string.IsNullOrWhiteSpace(createdLobby.Name) ? createdLobby.Name : GetLobbyDataValue(createdLobby, "roomName");
-        string safeRoomName = !string.IsNullOrWhiteSpace(lobbyRoomName)
-            ? lobbyRoomName
-            : (draft != null && !string.IsNullOrWhiteSpace(draft.roomName) ? draft.roomName : "Fun Match");
-        int treasureCount = ParseLobbyDataInt(createdLobby, "treasureCount", draft != null ? draft.treasureCount : 0);
-        int selectedMapIndex = ParseLobbyDataInt(createdLobby, "selectedMapIndex", draft != null ? draft.selectedMapIndex : 0);
-
-        LocalPlayerProfile localPlayer = store.LocalPlayer;
-        string localPlayerId = localPlayer != null && !string.IsNullOrWhiteSpace(localPlayer.playerId)
-            ? localPlayer.playerId
-            : "local_player";
-        string localDisplayName = localPlayer != null && !string.IsNullOrWhiteSpace(localPlayer.displayName)
-            ? localPlayer.displayName
-            : "You";
-        int localColorIndex = localPlayer != null ? Mathf.Max(0, localPlayer.selectedColorIndex) : 0;
-
-        RoomState mappedRoom = new RoomState
+        if (unityLobbyService == null)
         {
-            roomId = !string.IsNullOrWhiteSpace(createdLobby.Id)
-                ? createdLobby.Id
-                : (!string.IsNullOrWhiteSpace(createdLobby.LobbyCode) ? createdLobby.LobbyCode : "000000"),
-            roomName = safeRoomName,
-            isPublic = !createdLobby.IsPrivate,
-            maxPlayers = safeMaxPlayers,
-            selectedMapIndex = Mathf.Max(0, selectedMapIndex),
-            treasureCount = Mathf.Max(0, treasureCount),
-            players = new List<PlayerState>
+            unityLobbyService = new UnityLobbyService();
+        }
+
+        RoomState mappedRoom = unityLobbyService.MapLobbyToRoomState(createdLobby, false);
+        if (mappedRoom == null)
+        {
+            return;
+        }
+
+        // Create response may rarely omit player list; keep local creator visible safely.
+        if (mappedRoom.players == null)
+        {
+            mappedRoom.players = new List<PlayerState>();
+        }
+
+        if (mappedRoom.players.Count == 0 && store.LocalPlayer != null)
+        {
+            mappedRoom.players.Add(new PlayerState
             {
-                new PlayerState
-                {
-                    playerId = localPlayerId,
-                    displayName = localDisplayName,
-                    isReady = false,
-                    isHost = true,
-                    selectedColorIndex = localColorIndex
-                }
-            }
-        };
+                playerId = store.LocalPlayer.playerId,
+                displayName = store.LocalPlayer.displayName,
+                isReady = false,
+                isHost = true,
+                selectedColorIndex = Mathf.Max(0, store.LocalPlayer.selectedColorIndex)
+            });
+        }
 
         store.SetCurrentRoom(mappedRoom);
         UpsertRoom(store.Rooms, mappedRoom);
@@ -388,32 +377,6 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
         rooms.Add(room);
     }
 
-    private static int ParseLobbyDataInt(Lobby lobby, string key, int fallback)
-    {
-        string value = GetLobbyDataValue(lobby, key);
-        if (int.TryParse(value, out int parsed))
-        {
-            return parsed;
-        }
-
-        return fallback;
-    }
-
-    private static string GetLobbyDataValue(Lobby lobby, string key)
-    {
-        if (lobby == null || lobby.Data == null || string.IsNullOrWhiteSpace(key))
-        {
-            return string.Empty;
-        }
-
-        if (!lobby.Data.TryGetValue(key, out DataObject dataObject) || dataObject == null)
-        {
-            return string.Empty;
-        }
-
-        return dataObject.Value ?? string.Empty;
-    }
-
     private async void OnLeaveButtonClicked()
     {
         if (isLeaveInProgress)
@@ -439,14 +402,28 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
                 return;
             }
 
-            bool hasLeaveIdentifiers = !string.IsNullOrWhiteSpace(lobbyId) && !string.IsNullOrWhiteSpace(playerId);
-            if (!hasLeaveIdentifiers)
+            if (string.IsNullOrWhiteSpace(lobbyId))
             {
-                Debug.LogWarning("LobbyMockScreenSwitcher: Leave skipped because lobbyId or playerId is missing.");
+                Debug.LogWarning("LobbyMockScreenSwitcher: Leave skipped because lobbyId is missing.");
                 return;
             }
 
-            canLeave = await TryLeaveLobbyAsync(lobbyId, playerId);
+            bool isLocalHost = IsLocalHost(currentRoom, playerId);
+            if (isLocalHost)
+            {
+                canLeave = await TryDeleteLobbyAsync(lobbyId);
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(playerId))
+                {
+                    Debug.LogWarning("LobbyMockScreenSwitcher: Leave skipped because playerId is missing.");
+                    return;
+                }
+
+                canLeave = await TryLeaveLobbyAsync(lobbyId, playerId);
+            }
+
             if (!canLeave)
             {
                 Debug.LogWarning($"LobbyMockScreenSwitcher: Leave failed safely for lobbyId={lobbyId}.");
@@ -488,5 +465,49 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
             Debug.LogWarning($"LobbyMockScreenSwitcher: Unity Lobby leave threw safely. {exception.Message}");
             return false;
         }
+    }
+
+    private async Task<bool> TryDeleteLobbyAsync(string lobbyId)
+    {
+        if (unityLobbyService == null)
+        {
+            unityLobbyService = new UnityLobbyService();
+        }
+
+        try
+        {
+            return await unityLobbyService.DeleteLobbyAsync(lobbyId);
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning($"LobbyMockScreenSwitcher: Unity Lobby delete threw safely. {exception.Message}");
+            return false;
+        }
+    }
+
+    private static bool IsLocalHost(RoomState room, string localPlayerId)
+    {
+        if (room == null || room.players == null || string.IsNullOrWhiteSpace(localPlayerId))
+        {
+            return false;
+        }
+
+        string safeLocalId = localPlayerId.Trim();
+        for (int i = 0; i < room.players.Count; i++)
+        {
+            PlayerState player = room.players[i];
+            if (player == null)
+            {
+                continue;
+            }
+
+            string playerId = player.playerId != null ? player.playerId.Trim() : string.Empty;
+            if (string.Equals(playerId, safeLocalId, StringComparison.Ordinal))
+            {
+                return player.isHost;
+            }
+        }
+
+        return false;
     }
 }

@@ -392,16 +392,19 @@ public class RoomBrowserScreenBinder : MonoBehaviour
         return dataObject.Value ?? string.Empty;
     }
 
-    private static RoomState ConvertLobbyToRoomState(Lobby lobby)
+    private RoomState ConvertLobbyToRoomState(Lobby lobby)
     {
         if (lobby == null)
         {
             return null;
         }
 
-        List<Lobby> singleLobbyList = new List<Lobby>(1) { lobby };
-        List<RoomState> mappedRooms = ConvertLobbiesToRoomStates(singleLobbyList);
-        return mappedRooms.Count > 0 ? mappedRooms[0] : null;
+        if (lobbyService == null)
+        {
+            lobbyService = new UnityLobbyService();
+        }
+
+        return lobbyService.MapLobbyToRoomState(lobby, false);
     }
 
     private async Task<Lobby> JoinUnityLobbyByIdAsync(string lobbyId)
