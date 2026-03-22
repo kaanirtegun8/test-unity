@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Unity.Services.Authentication;
+using Unity.Services.Core;
 using Unity.Services.Lobbies;
 using Unity.Services.Lobbies.Models;
 using UnityEngine;
@@ -143,12 +144,32 @@ public class UnityLobbyService
 
     private static bool EnsureSignedIn()
     {
-        if (AuthenticationService.Instance != null && AuthenticationService.Instance.IsSignedIn)
+        if (UnityServices.State != ServicesInitializationState.Initialized)
         {
-            return true;
+            Debug.LogWarning("UnityLobbyService: Unity Services is not initialized yet.");
+            return false;
         }
 
-        Debug.LogWarning("UnityLobbyService: Authentication required before Lobby calls.");
-        return false;
+        try
+        {
+            var authService = AuthenticationService.Instance;
+            if (authService != null && authService.IsSignedIn)
+            {
+                return true;
+            }
+
+            Debug.LogWarning("UnityLobbyService: Authentication required before Lobby calls.");
+            return false;
+        }
+        catch (ServicesInitializationException exception)
+        {
+            Debug.LogWarning($"UnityLobbyService: Authentication singleton is not ready yet. {exception.Message}");
+            return false;
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning($"UnityLobbyService: Authentication readiness check failed safely. {exception.Message}");
+            return false;
+        }
     }
 }
