@@ -20,12 +20,25 @@ public class CurrentRoomScreenBinder : MonoBehaviour
     [SerializeField] private TMP_Text sideRewardText;
     [SerializeField] private Image sideMapPreview;
     [SerializeField] private GameObject[] playerSlots = new GameObject[DefaultSlotCount];
+    [SerializeField] private Button playerSlot01StatusButton;
+    [SerializeField] private Image playerSlot01StatusButtonImage;
+    [SerializeField] private TMP_Text playerSlot01StatusText;
+    [SerializeField] private Sprite hostReadyButtonSprite;
+    [SerializeField] private Sprite hostNotReadyButtonSprite;
     [SerializeField] [Range(0f, 1f)] private float sideMapPreviewAlpha = 1f;
     [SerializeField] private string occupiedSlotStatusText = "Waiting...";
-    [SerializeField] private string availableSlotStatusText = "Available";
+    [SerializeField] private string availableSlotStatusText = "Empty";
     [SerializeField] private string lockedSlotStatusText = "Locked";
+    [SerializeField] private string hostReadyActionText = "Ready Up";
+    [SerializeField] private string hostReadyStateText = "Cancel Ready";
+    [SerializeField] private string otherPlayerReadyText = "Ready";
+    [SerializeField] private string otherPlayerNotReadyText = "Not Ready";
     [SerializeField] [Range(0f, 1f)] private float availableSlotAlpha = 0.82f;
     [SerializeField] [Range(0f, 1f)] private float lockedSlotAlpha = 0.42f;
+    [SerializeField] private Color hostReadyButtonTint = new Color(0.36f, 0.86f, 0.28f, 1f);
+    [SerializeField] private Color hostNotReadyButtonTint = new Color(0.62f, 0.66f, 0.73f, 0.95f);
+    [SerializeField] private Color emptyStateButtonTint = new Color(0.62f, 0.66f, 0.73f, 0.85f);
+    [SerializeField] private Color lockedStateButtonTint = new Color(0.52f, 0.56f, 0.62f, 0.75f);
 
     private static readonly Color[] SideMapPreviewPalette =
     {
@@ -46,12 +59,19 @@ public class CurrentRoomScreenBinder : MonoBehaviour
     private void Awake()
     {
         AutoAssignReferences();
+        BindUiEvents();
         ApplyCurrentRoomToUi();
     }
 
     private void OnEnable()
     {
+        BindUiEvents();
         ApplyCurrentRoomToUi();
+    }
+
+    private void OnDestroy()
+    {
+        UnbindUiEvents();
     }
 
 #if UNITY_EDITOR
@@ -105,7 +125,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             sideRewardText.text = $"x{safeTreasureCount}";
         }
 
-        ApplyPlayerSlotsVisuals(safePlayerCount, safeMaxPlayers);
+        ApplyPlayerSlotsVisuals(currentRoom, safePlayerCount, safeMaxPlayers);
         ApplySideMapPreviewVisual(currentRoom.selectedMapIndex);
     }
 
@@ -136,17 +156,18 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             sideRewardText.text = "x2";
         }
 
-        ApplyPlayerSlotsVisuals(0, DefaultSlotCount);
+        ApplyPlayerSlotsVisuals(null, 0, DefaultSlotCount);
         ApplySideMapPreviewVisual(0);
     }
 
-    private void ApplyPlayerSlotsVisuals(int playerCount, int maxPlayers)
+    private void ApplyPlayerSlotsVisuals(RoomState currentRoom, int playerCount, int maxPlayers)
     {
         if (playerSlots == null || playerSlots.Length == 0)
         {
             return;
         }
 
+        PlayerState localHostPlayer = FindLocalHostPlayer(currentRoom);
         int safeMaxPlayers = Mathf.Clamp(maxPlayers, 0, playerSlots.Length);
         int safePlayerCount = Mathf.Clamp(playerCount, 0, safeMaxPlayers);
 
@@ -158,9 +179,15 @@ public class CurrentRoomScreenBinder : MonoBehaviour
                 continue;
             }
 
-            if (i < safePlayerCount)
+            PlayerState slotPlayer = GetPlayerForSlot(currentRoom, localHostPlayer, i);
+
+            if (i == 0 && safePlayerCount > 0 && localHostPlayer != null)
             {
-                ApplySlotVisualState(slot, SlotVisualState.Occupied);
+                ApplyLocalHostSlotVisual(slot, localHostPlayer.isReady);
+            }
+            else if (i < safePlayerCount)
+            {
+                ApplyOtherPlayerSlotVisual(slot, slotPlayer != null && slotPlayer.isReady);
             }
             else if (i < safeMaxPlayers)
             {
@@ -170,6 +197,138 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             {
                 ApplySlotVisualState(slot, SlotVisualState.Locked);
             }
+        }
+    }
+
+    private static PlayerState GetPlayerForSlot(RoomState currentRoom, PlayerState localHostPlayer, int slotIndex)
+    {
+        if (currentRoom == null || currentRoom.players == null || slotIndex < 0)
+        {
+            return null;
+        }
+
+        if (localHostPlayer == null)
+        {
+            return slotIndex < currentRoom.players.Count ? currentRoom.players[slotIndex] : null;
+        }
+
+        if (slotIndex == 0)
+        {
+            return localHostPlayer;
+        }
+
+        int targetNonHostIndex = slotIndex - 1;
+        int currentNonHostIndex = 0;
+        for (int i = 0; i < currentRoom.players.Count; i++)
+        {
+            PlayerState candidate = currentRoom.players[i];
+            if (candidate == null || candidate.isHost)
+            {
+                continue;
+            }
+
+            if (currentNonHostIndex == targetNonHostIndex)
+            {
+                return candidate;
+            }
+
+            currentNonHostIndex++;
+        }
+
+        return null;
+    }
+
+    private void ApplyLocalHostSlotVisual(GameObject slot, bool isReady)
+    {
+        if (slot == null)
+        {
+            return;
+        }
+
+        Image slotBackground = slot.GetComponent<Image>();
+        Transform avatarTransform = slot.transform.Find("AvatarPlaceholder");
+        Image avatarImage = avatarTransform != null ? avatarTransform.GetComponent<Image>() : null;
+        Transform statusTransform = slot.transform.Find("StatusButton");
+        Button statusButton = statusTransform != null ? statusTransform.GetComponent<Button>() : null;
+        Image statusButtonImage = statusTransform != null ? statusTransform.GetComponent<Image>() : null;
+        TMP_Text statusText = null;
+        if (statusTransform != null)
+        {
+            Transform labelTransform = statusTransform.Find("Label");
+            if (labelTransform != null)
+            {
+                statusText = labelTransform.GetComponent<TMP_Text>();
+            }
+        }
+
+        SetGraphicAlpha(slotBackground, 1f);
+        SetGraphicAlpha(avatarImage, 1f);
+        SetGraphicAlpha(statusButtonImage, 1f);
+        SetText(statusText, isReady ? hostReadyStateText : hostReadyActionText, isReady ? 1f : 0.9f);
+
+        EnsureHostStatusSprites();
+        if (statusButtonImage != null)
+        {
+            Sprite targetSprite = isReady ? hostReadyButtonSprite : hostNotReadyButtonSprite;
+            if (targetSprite != null)
+            {
+                statusButtonImage.sprite = targetSprite;
+                statusButtonImage.overrideSprite = targetSprite;
+            }
+
+            statusButtonImage.color = isReady ? hostReadyButtonTint : hostNotReadyButtonTint;
+        }
+
+        if (statusButton != null)
+        {
+            statusButton.interactable = true;
+        }
+    }
+
+    private void ApplyOtherPlayerSlotVisual(GameObject slot, bool isReady)
+    {
+        if (slot == null)
+        {
+            return;
+        }
+
+        Image slotBackground = slot.GetComponent<Image>();
+        Transform avatarTransform = slot.transform.Find("AvatarPlaceholder");
+        Image avatarImage = avatarTransform != null ? avatarTransform.GetComponent<Image>() : null;
+        Transform statusTransform = slot.transform.Find("StatusButton");
+        Button statusButton = statusTransform != null ? statusTransform.GetComponent<Button>() : null;
+        Image statusButtonImage = statusTransform != null ? statusTransform.GetComponent<Image>() : null;
+        TMP_Text statusText = null;
+        if (statusTransform != null)
+        {
+            Transform labelTransform = statusTransform.Find("Label");
+            if (labelTransform != null)
+            {
+                statusText = labelTransform.GetComponent<TMP_Text>();
+            }
+        }
+
+        SetGraphicAlpha(slotBackground, 1f);
+        SetGraphicAlpha(avatarImage, 1f);
+        SetGraphicAlpha(statusButtonImage, 1f);
+        SetText(statusText, isReady ? otherPlayerReadyText : otherPlayerNotReadyText, 0.95f);
+
+        EnsureHostStatusSprites();
+        if (statusButtonImage != null)
+        {
+            Sprite targetSprite = isReady ? hostReadyButtonSprite : hostNotReadyButtonSprite;
+            if (targetSprite != null)
+            {
+                statusButtonImage.sprite = targetSprite;
+                statusButtonImage.overrideSprite = targetSprite;
+            }
+
+            statusButtonImage.color = isReady ? hostReadyButtonTint : hostNotReadyButtonTint;
+        }
+
+        if (statusButton != null)
+        {
+            statusButton.interactable = false;
         }
     }
 
@@ -203,6 +362,13 @@ public class CurrentRoomScreenBinder : MonoBehaviour
                 SetGraphicAlpha(avatarImage, 1f);
                 SetGraphicAlpha(statusButtonImage, 1f);
                 SetText(statusText, occupiedSlotStatusText, 1f);
+                EnsureHostStatusSprites();
+                if (statusButtonImage != null && hostNotReadyButtonSprite != null)
+                {
+                    statusButtonImage.sprite = hostNotReadyButtonSprite;
+                    statusButtonImage.overrideSprite = hostNotReadyButtonSprite;
+                    statusButtonImage.color = hostNotReadyButtonTint;
+                }
                 if (statusButton != null)
                 {
                     statusButton.interactable = false;
@@ -213,6 +379,13 @@ public class CurrentRoomScreenBinder : MonoBehaviour
                 SetGraphicAlpha(avatarImage, availableSlotAlpha);
                 SetGraphicAlpha(statusButtonImage, availableSlotAlpha);
                 SetText(statusText, availableSlotStatusText, availableSlotAlpha);
+                EnsureHostStatusSprites();
+                if (statusButtonImage != null && hostNotReadyButtonSprite != null)
+                {
+                    statusButtonImage.sprite = hostNotReadyButtonSprite;
+                    statusButtonImage.overrideSprite = hostNotReadyButtonSprite;
+                    statusButtonImage.color = emptyStateButtonTint;
+                }
                 if (statusButton != null)
                 {
                     statusButton.interactable = false;
@@ -223,6 +396,13 @@ public class CurrentRoomScreenBinder : MonoBehaviour
                 SetGraphicAlpha(avatarImage, lockedSlotAlpha);
                 SetGraphicAlpha(statusButtonImage, lockedSlotAlpha);
                 SetText(statusText, lockedSlotStatusText, lockedSlotAlpha);
+                EnsureHostStatusSprites();
+                if (statusButtonImage != null && hostNotReadyButtonSprite != null)
+                {
+                    statusButtonImage.sprite = hostNotReadyButtonSprite;
+                    statusButtonImage.overrideSprite = hostNotReadyButtonSprite;
+                    statusButtonImage.color = lockedStateButtonTint;
+                }
                 if (statusButton != null)
                 {
                     statusButton.interactable = false;
@@ -269,6 +449,55 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         sideMapPreview.color = previewColor;
     }
 
+    private void BindUiEvents()
+    {
+        if (playerSlot01StatusButton != null)
+        {
+            playerSlot01StatusButton.onClick.RemoveListener(OnPlayerSlot01StatusClicked);
+            playerSlot01StatusButton.onClick.AddListener(OnPlayerSlot01StatusClicked);
+        }
+    }
+
+    private void UnbindUiEvents()
+    {
+        if (playerSlot01StatusButton != null)
+        {
+            playerSlot01StatusButton.onClick.RemoveListener(OnPlayerSlot01StatusClicked);
+        }
+    }
+
+    private void OnPlayerSlot01StatusClicked()
+    {
+        RoomState currentRoom = SharedStore.CurrentRoom;
+        PlayerState localHostPlayer = FindLocalHostPlayer(currentRoom);
+        if (currentRoom == null || localHostPlayer == null)
+        {
+            return;
+        }
+
+        localHostPlayer.isReady = !localHostPlayer.isReady;
+        ApplyCurrentRoomToUi();
+    }
+
+    private static PlayerState FindLocalHostPlayer(RoomState currentRoom)
+    {
+        if (currentRoom == null || currentRoom.players == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < currentRoom.players.Count; i++)
+        {
+            PlayerState player = currentRoom.players[i];
+            if (player != null && player.isHost)
+            {
+                return player;
+            }
+        }
+
+        return null;
+    }
+
     private void AutoAssignReferences()
     {
         Transform[] allTransforms = transform.GetComponentsInChildren<Transform>(true);
@@ -312,6 +541,77 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         AssignSlotByName(allTransforms, "PlayerSlot02", 1);
         AssignSlotByName(allTransforms, "PlayerSlot03", 2);
         AssignSlotByName(allTransforms, "PlayerSlot04", 3);
+
+        if (playerSlot01StatusButton == null && playerSlots[0] != null)
+        {
+            Transform statusTransform = playerSlots[0].transform.Find("StatusButton");
+            if (statusTransform != null)
+            {
+                playerSlot01StatusButton = statusTransform.GetComponent<Button>();
+            }
+        }
+
+        if (playerSlot01StatusButtonImage == null && playerSlot01StatusButton != null)
+        {
+            playerSlot01StatusButtonImage = playerSlot01StatusButton.GetComponent<Image>();
+        }
+
+        if (playerSlot01StatusText == null && playerSlot01StatusButton != null)
+        {
+            Transform labelTransform = playerSlot01StatusButton.transform.Find("Label");
+            if (labelTransform != null)
+            {
+                playerSlot01StatusText = labelTransform.GetComponent<TMP_Text>();
+            }
+        }
+
+        EnsureHostStatusSprites();
+    }
+
+    private void EnsureHostStatusSprites()
+    {
+        if (hostReadyButtonSprite == null && playerSlot01StatusButtonImage != null)
+        {
+            hostReadyButtonSprite = playerSlot01StatusButtonImage.sprite;
+        }
+
+        if (hostNotReadyButtonSprite == null)
+        {
+            Image preferredPassiveImage = GetSlotStatusButtonImage(DefaultSlotCount - 1);
+            if (preferredPassiveImage != null && preferredPassiveImage.sprite != null)
+            {
+                hostNotReadyButtonSprite = preferredPassiveImage.sprite;
+            }
+        }
+
+        if (hostNotReadyButtonSprite == null)
+        {
+            for (int i = 1; i < DefaultSlotCount; i++)
+            {
+                Image candidateImage = GetSlotStatusButtonImage(i);
+                if (candidateImage != null && candidateImage.sprite != null)
+                {
+                    hostNotReadyButtonSprite = candidateImage.sprite;
+                    break;
+                }
+            }
+        }
+
+        if (hostNotReadyButtonSprite == null)
+        {
+            hostNotReadyButtonSprite = hostReadyButtonSprite;
+        }
+    }
+
+    private Image GetSlotStatusButtonImage(int slotIndex)
+    {
+        if (playerSlots == null || slotIndex < 0 || slotIndex >= playerSlots.Length || playerSlots[slotIndex] == null)
+        {
+            return null;
+        }
+
+        Transform statusTransform = playerSlots[slotIndex].transform.Find("StatusButton");
+        return statusTransform != null ? statusTransform.GetComponent<Image>() : null;
     }
 
     private void AssignSlotByName(Transform[] allTransforms, string slotName, int index)
