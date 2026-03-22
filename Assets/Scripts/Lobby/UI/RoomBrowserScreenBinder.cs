@@ -2,40 +2,32 @@ using System;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
-#if UNITY_EDITOR
-using UnityEditor;
-#endif
 
 public class RoomBrowserScreenBinder : MonoBehaviour
 {
     private const string RuntimeItemNamePrefix = "RuntimeRoomItem_";
-    private const int MockRowCount = 3;
     private const float RowHeight = 170f;
     private const float RowSpacing = 14f;
     private const float RowHorizontalPadding = -8f;
 
     private static readonly Vector2 MapAnchoredPosition = new Vector2(300f, 0f);
     private static readonly Vector2 MapSize = new Vector2(230f, 132f);
-    private static readonly Vector2 RoomNameAnchoredPosition = new Vector2(620f, 0f);
-    private static readonly Vector2 RoomNameSize = new Vector2(510f, 56f);
+    private static readonly Vector2 RoomNameAnchoredPosition = new Vector2(620f, 18f);
+    private static readonly Vector2 RoomNameSize = new Vector2(430f, 48f);
     private static readonly Vector2 PlayerCountAnchoredPosition = new Vector2(1080f, 0f);
     private static readonly Vector2 PlayerCountSize = new Vector2(140f, 84f);
-    private static readonly Vector2 RoomIdButtonAnchoredPosition = new Vector2(28f, 0f);
-    private static readonly Vector2 RoomIdButtonSize = new Vector2(244f, 74f);
-    private static readonly Vector2 RoomIdTextAnchoredPosition = new Vector2(28f, 0f);
-    private static readonly Vector2 RoomIdTextSize = new Vector2(186f, 44f);
-    private static readonly Vector2 RoomIdIconAnchoredPosition = new Vector2(30f, 0f);
-    private static readonly Vector2 RoomIdIconSize = new Vector2(34f, 34f);
-
-#if UNITY_EDITOR
-    private const string RoomIdButtonSpritePath = "Assets/Simple Buttons/Big Buttons/BigBlue.png";
-    private const string RoomIdIconSpritePath = "Assets/Simple Buttons/Icons/Icon_16.gif";
-    private static Sprite cachedRoomIdButtonSprite;
-    private static Sprite cachedRoomIdIconSprite;
-#endif
+    private static readonly Vector2 RoomIdTextAnchoredPosition = new Vector2(620f, -20f);
+    private static readonly Vector2 RoomIdTextSize = new Vector2(430f, 34f);
+    private static readonly Vector2 RewardAreaAnchoredPosition = new Vector2(-390f, 0f);
+    private static readonly Vector2 RewardAreaSize = new Vector2(220f, 92f);
+    private static readonly Vector2 JoinButtonAnchoredPosition = new Vector2(-24f, 0f);
+    private static readonly Vector2 JoinButtonSize = new Vector2(260f, 130f);
 
     [SerializeField] private RectTransform contentRoot;
     [SerializeField] private GameObject roomListItemPrefab;
+    [SerializeField] private GameObject roomBrowserScreen;
+    [SerializeField] private GameObject createRoomScreen;
+    [SerializeField] private GameObject currentRoomScreen;
     [SerializeField] private Button createRoomButton;
     [SerializeField] private Button refreshButton;
     [SerializeField] private Button filterRoomsButton;
@@ -51,14 +43,28 @@ public class RoomBrowserScreenBinder : MonoBehaviour
     private void Awake()
     {
         AutoAssignReferences();
+        BindControlButtons();
     }
 
     private void OnEnable()
     {
+        AutoAssignReferences();
+        BindControlButtons();
+
         if (refreshOnEnable || SharedStore.Rooms.Count > 0)
         {
             RefreshRoomList();
         }
+    }
+
+    private void OnDisable()
+    {
+        UnbindControlButtons();
+    }
+
+    private void OnDestroy()
+    {
+        UnbindControlButtons();
     }
 
 #if UNITY_EDITOR
@@ -91,8 +97,13 @@ public class RoomBrowserScreenBinder : MonoBehaviour
         ResolveTemplateItem();
         ClearRuntimeItems();
 
+        if (templateItemTransform != null && hideTemplateItemOnRuntime)
+        {
+            templateItemTransform.gameObject.SetActive(false);
+        }
+
         bool hasRealRooms = SharedStore.Rooms != null && SharedStore.Rooms.Count > 0;
-        int rowCount = hasRealRooms ? SharedStore.Rooms.Count : MockRowCount;
+        int rowCount = hasRealRooms ? SharedStore.Rooms.Count : 0;
         if (rowCount <= 0)
         {
             if (logRefreshInfo)
@@ -113,11 +124,6 @@ public class RoomBrowserScreenBinder : MonoBehaviour
             return;
         }
 
-        if (templateItemTransform != null && hideTemplateItemOnRuntime)
-        {
-            templateItemTransform.gameObject.SetActive(false);
-        }
-
         PrepareContentRootLayout(rowCount);
 
         for (int i = 0; i < rowCount; i++)
@@ -126,7 +132,7 @@ public class RoomBrowserScreenBinder : MonoBehaviour
             instance.name = RuntimeItemNamePrefix + (i + 1).ToString("00");
             instance.SetActive(true);
             ApplyRowContainerLayout(instance, i);
-            BindRoomItem(instance, hasRealRooms ? SharedStore.Rooms[i] : null, i);
+            BindRoomItem(instance, hasRealRooms ? SharedStore.Rooms[i] : null, i, HandleJoinButtonClicked);
         }
 
         if (Application.isPlaying)
@@ -163,7 +169,7 @@ public class RoomBrowserScreenBinder : MonoBehaviour
 
     private void AutoAssignReferences()
     {
-        Transform[] allTransforms = transform.GetComponentsInChildren<Transform>(true);
+        Transform[] allTransforms = transform.root.GetComponentsInChildren<Transform>(true);
 
         if (contentRoot == null)
         {
@@ -189,6 +195,33 @@ public class RoomBrowserScreenBinder : MonoBehaviour
             filterRoomsButton = FindButtonByName(allTransforms, "FilterRoomsButton");
         }
 
+        if (roomBrowserScreen == null)
+        {
+            Transform browser = FindByName(allTransforms, "RoomBrowserScreen");
+            if (browser != null)
+            {
+                roomBrowserScreen = browser.gameObject;
+            }
+        }
+
+        if (currentRoomScreen == null)
+        {
+            Transform current = FindByName(allTransforms, "CurrentRoomScreen");
+            if (current != null)
+            {
+                currentRoomScreen = current.gameObject;
+            }
+        }
+
+        if (createRoomScreen == null)
+        {
+            Transform create = FindByName(allTransforms, "CreateRoomScreen");
+            if (create != null)
+            {
+                createRoomScreen = create.gameObject;
+            }
+        }
+
         if (roomListItemPrefab == null && contentRoot != null && contentRoot.childCount > 0)
         {
             roomListItemPrefab = contentRoot.GetChild(0).gameObject;
@@ -210,7 +243,64 @@ public class RoomBrowserScreenBinder : MonoBehaviour
         }
     }
 
-    private static void BindRoomItem(GameObject itemObject, RoomState roomState, int rowIndex)
+    private void BindControlButtons()
+    {
+        if (refreshButton != null)
+        {
+            refreshButton.onClick.RemoveListener(RefreshRoomList);
+            refreshButton.onClick.AddListener(RefreshRoomList);
+        }
+    }
+
+    private void UnbindControlButtons()
+    {
+        if (refreshButton != null)
+        {
+            refreshButton.onClick.RemoveListener(RefreshRoomList);
+        }
+    }
+
+    private void HandleJoinButtonClicked(RoomState selectedRoom)
+    {
+        if (selectedRoom == null)
+        {
+            return;
+        }
+
+        if (SharedStore.Rooms == null || !SharedStore.Rooms.Contains(selectedRoom))
+        {
+            return;
+        }
+
+        bool joinedOrAlreadyMember = SharedStore.TryJoinRoom(selectedRoom);
+        if (!joinedOrAlreadyMember)
+        {
+            return;
+        }
+
+        AutoAssignReferences();
+
+        if (createRoomScreen != null)
+        {
+            createRoomScreen.SetActive(false);
+        }
+
+        if (roomBrowserScreen != null)
+        {
+            roomBrowserScreen.SetActive(false);
+        }
+
+        if (currentRoomScreen != null)
+        {
+            currentRoomScreen.SetActive(true);
+        }
+    }
+
+    private static void BindRoomItem(
+        GameObject itemObject,
+        RoomState roomState,
+        int rowIndex,
+        Action<RoomState> onJoinRequested)
     {
         if (itemObject == null)
         {
@@ -219,7 +309,7 @@ public class RoomBrowserScreenBinder : MonoBehaviour
 
         bool hasRealRoom = roomState != null;
         int playerCount = hasRealRoom && roomState.players != null ? roomState.players.Count : GetMockPlayerCount(rowIndex);
-        int maxPlayers = hasRealRoom ? Mathf.Max(0, roomState.maxPlayers) : GetMockMaxPlayers(rowIndex);
+        int maxPlayers = hasRealRoom ? Mathf.Max(1, roomState.maxPlayers) : GetMockMaxPlayers(rowIndex);
         int treasureCount = hasRealRoom ? Mathf.Max(0, roomState.treasureCount) : GetMockTreasureCount(rowIndex);
         ApplyMapThumbnailVisual(itemObject.transform);
 
@@ -233,6 +323,7 @@ public class RoomBrowserScreenBinder : MonoBehaviour
         TMP_Text rewardCountText = FindTextByName(itemObject.transform, "RewardCountText");
         if (rewardCountText != null)
         {
+            ApplyRewardAreaVisual(itemObject.transform);
             rewardCountText.text = $"x{treasureCount}";
         }
 
@@ -241,13 +332,13 @@ public class RoomBrowserScreenBinder : MonoBehaviour
         {
             string safeRoomName = hasRealRoom && !string.IsNullOrWhiteSpace(roomState.roomName)
                 ? roomState.roomName
-                : "Funny Match";
+                : "Fun Match";
             ApplyRoomNameVisual(roomNameText);
             roomNameText.text = safeRoomName;
         }
 
-        Button roomIdButton = EnsureRoomIdButton(itemObject.transform, roomNameText, out TMP_Text roomIdText);
-        if (roomIdButton != null && roomIdText != null)
+        TMP_Text roomIdText = EnsureRoomIdText(itemObject.transform, roomNameText);
+        if (roomIdText != null)
         {
             string safeRoomId = hasRealRoom && !string.IsNullOrWhiteSpace(roomState.roomId)
                 ? roomState.roomId
@@ -259,24 +350,29 @@ public class RoomBrowserScreenBinder : MonoBehaviour
             }
 
             roomIdText.text = $"ID: {safeRoomId}";
-
-            roomIdButton.onClick.RemoveAllListeners();
-            string roomIdToCopy = safeRoomId;
-            roomIdButton.onClick.AddListener(() => CopyRoomIdToClipboard(roomIdToCopy));
         }
 
         Button joinButton = FindButtonByName(itemObject.transform, "JoinButton");
         if (joinButton != null)
         {
+            ApplyJoinButtonVisual(joinButton);
             bool isRoomFull = maxPlayers > 0 && playerCount >= maxPlayers;
-            joinButton.interactable = !isRoomFull;
+            bool isJoinable = hasRealRoom && !isRoomFull;
+            joinButton.interactable = isJoinable;
+            joinButton.onClick.RemoveAllListeners();
 
             Image joinButtonImage = joinButton.GetComponent<Image>();
             if (joinButtonImage != null)
             {
-                joinButtonImage.color = isRoomFull
-                    ? new Color(0.66f, 0.70f, 0.76f, 0.92f)
-                    : Color.white;
+                joinButtonImage.color = isJoinable
+                    ? Color.white
+                    : new Color(0.66f, 0.70f, 0.76f, 0.92f);
+            }
+
+            if (isJoinable && onJoinRequested != null)
+            {
+                RoomState capturedRoom = roomState;
+                joinButton.onClick.AddListener(() => onJoinRequested(capturedRoom));
             }
         }
     }
@@ -403,92 +499,75 @@ public class RoomBrowserScreenBinder : MonoBehaviour
         }
 
         RectTransform rect = roomIdText.rectTransform;
-        rect.anchorMin = new Vector2(0.5f, 0.5f);
-        rect.anchorMax = new Vector2(0.5f, 0.5f);
-        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.anchorMin = new Vector2(0f, 0.5f);
+        rect.anchorMax = new Vector2(0f, 0.5f);
+        rect.pivot = new Vector2(0f, 0.5f);
         rect.anchoredPosition = RoomIdTextAnchoredPosition;
         rect.sizeDelta = RoomIdTextSize;
 
         roomIdText.enableWordWrapping = false;
         roomIdText.overflowMode = TextOverflowModes.Ellipsis;
         roomIdText.alignment = TextAlignmentOptions.MidlineLeft;
-        roomIdText.fontStyle = FontStyles.Bold;
-        roomIdText.fontSize = 24f;
-        roomIdText.color = new Color(0.95f, 0.98f, 1f, 1f);
+        roomIdText.fontStyle = FontStyles.Normal;
+        roomIdText.fontSize = 20f;
+        roomIdText.color = new Color(0.86f, 0.92f, 1f, 1f);
         roomIdText.raycastTarget = false;
     }
 
-    private static Button EnsureRoomIdButton(Transform itemRoot, TMP_Text roomNameReference, out TMP_Text roomIdText)
+    private static void ApplyRewardAreaVisual(Transform itemRoot)
     {
-        roomIdText = null;
+        if (itemRoot == null)
+        {
+            return;
+        }
+
+        Transform rewardAreaTransform = itemRoot.Find("RewardArea");
+        if (rewardAreaTransform == null)
+        {
+            return;
+        }
+
+        RectTransform rect = rewardAreaTransform as RectTransform;
+        if (rect == null)
+        {
+            return;
+        }
+
+        rect.anchorMin = new Vector2(1f, 0.5f);
+        rect.anchorMax = new Vector2(1f, 0.5f);
+        rect.pivot = new Vector2(1f, 0.5f);
+        rect.anchoredPosition = RewardAreaAnchoredPosition;
+        rect.sizeDelta = RewardAreaSize;
+    }
+
+    private static TMP_Text EnsureRoomIdText(Transform itemRoot, TMP_Text roomNameReference)
+    {
         if (itemRoot == null)
         {
             return null;
         }
 
-        Transform buttonTransform = itemRoot.Find("RoomIdButton");
-        Button roomIdButton = buttonTransform != null ? buttonTransform.GetComponent<Button>() : null;
-
-        if (roomIdButton == null)
-        {
-            GameObject buttonObject = new GameObject("RoomIdButton", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
-            buttonObject.transform.SetParent(itemRoot, false);
-            roomIdButton = buttonObject.GetComponent<Button>();
-        }
-
-        RectTransform buttonRect = roomIdButton.GetComponent<RectTransform>();
-        buttonRect.anchorMin = new Vector2(0f, 0.5f);
-        buttonRect.anchorMax = new Vector2(0f, 0.5f);
-        buttonRect.pivot = new Vector2(0f, 0.5f);
-        buttonRect.anchoredPosition = RoomIdButtonAnchoredPosition;
-        buttonRect.sizeDelta = RoomIdButtonSize;
-
-        Image buttonImage = roomIdButton.GetComponent<Image>();
-        if (buttonImage != null)
-        {
-            Sprite roomIdButtonSprite = TryGetRoomIdButtonSprite();
-            if (roomIdButtonSprite != null)
-            {
-                buttonImage.sprite = roomIdButtonSprite;
-                buttonImage.type = Image.Type.Simple;
-                buttonImage.preserveAspect = false;
-                buttonImage.color = Color.white;
-            }
-            else
-            {
-                buttonImage.color = new Color(0.16f, 0.35f, 0.62f, 0.96f);
-            }
-
-            buttonImage.raycastTarget = true;
-        }
-
-        ColorBlock colors = roomIdButton.colors;
-        colors.normalColor = Color.white;
-        colors.highlightedColor = new Color(0.88f, 0.96f, 1f, 1f);
-        colors.pressedColor = new Color(0.76f, 0.88f, 1f, 1f);
-        colors.selectedColor = colors.highlightedColor;
-        colors.disabledColor = new Color(0.65f, 0.70f, 0.80f, 0.8f);
-        roomIdButton.colors = colors;
-        roomIdButton.transition = Selectable.Transition.ColorTint;
-        roomIdButton.interactable = true;
-
-        EnsureRoomIdIcon(roomIdButton.transform);
-
-        roomIdText = FindTextByName(roomIdButton.transform, "RoomIdText");
+        TMP_Text roomIdText = FindTextByName(itemRoot, "RoomIdText");
         if (roomIdText == null)
         {
-            Transform existingText = itemRoot.Find("RoomIdText");
-            if (existingText != null)
+            Transform roomIdButtonTransform = itemRoot.Find("RoomIdButton");
+            if (roomIdButtonTransform != null)
             {
-                existingText.SetParent(roomIdButton.transform, false);
-                roomIdText = existingText.GetComponent<TMP_Text>();
+                Transform nestedText = roomIdButtonTransform.Find("RoomIdText");
+                if (nestedText != null)
+                {
+                    nestedText.SetParent(itemRoot, false);
+                    roomIdText = nestedText.GetComponent<TMP_Text>();
+                }
+
+                DestroyForCurrentMode(roomIdButtonTransform.gameObject);
             }
         }
 
         if (roomIdText == null)
         {
             GameObject roomIdObject = new GameObject("RoomIdText", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
-            roomIdObject.transform.SetParent(roomIdButton.transform, false);
+            roomIdObject.transform.SetParent(itemRoot, false);
             roomIdText = roomIdObject.GetComponent<TextMeshProUGUI>();
         }
 
@@ -498,81 +577,7 @@ public class RoomBrowserScreenBinder : MonoBehaviour
         }
 
         ApplyRoomIdTextVisual(roomIdText);
-        return roomIdButton;
-    }
-
-    private static void EnsureRoomIdIcon(Transform roomIdButtonTransform)
-    {
-        if (roomIdButtonTransform == null)
-        {
-            return;
-        }
-
-        Transform iconTransform = roomIdButtonTransform.Find("RoomIdIcon");
-        Image iconImage;
-        if (iconTransform == null)
-        {
-            GameObject iconObject = new GameObject("RoomIdIcon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
-            iconObject.transform.SetParent(roomIdButtonTransform, false);
-            iconTransform = iconObject.transform;
-        }
-
-        iconImage = iconTransform.GetComponent<Image>();
-        if (iconImage == null)
-        {
-            iconImage = iconTransform.gameObject.AddComponent<Image>();
-        }
-
-        RectTransform iconRect = iconTransform as RectTransform;
-        iconRect.anchorMin = new Vector2(0f, 0.5f);
-        iconRect.anchorMax = new Vector2(0f, 0.5f);
-        iconRect.pivot = new Vector2(0.5f, 0.5f);
-        iconRect.anchoredPosition = RoomIdIconAnchoredPosition;
-        iconRect.sizeDelta = RoomIdIconSize;
-
-        Sprite iconSprite = TryGetRoomIdIconSprite();
-        if (iconSprite != null)
-        {
-            iconImage.sprite = iconSprite;
-            iconImage.color = Color.white;
-            iconImage.type = Image.Type.Simple;
-            iconImage.preserveAspect = true;
-        }
-        else
-        {
-            iconImage.sprite = null;
-            iconImage.color = new Color(0.90f, 0.95f, 1f, 0.95f);
-        }
-
-        iconImage.raycastTarget = false;
-    }
-
-    private static Sprite TryGetRoomIdButtonSprite()
-    {
-#if UNITY_EDITOR
-        if (cachedRoomIdButtonSprite == null)
-        {
-            cachedRoomIdButtonSprite = AssetDatabase.LoadAssetAtPath<Sprite>(RoomIdButtonSpritePath);
-        }
-
-        return cachedRoomIdButtonSprite;
-#else
-        return null;
-#endif
-    }
-
-    private static Sprite TryGetRoomIdIconSprite()
-    {
-#if UNITY_EDITOR
-        if (cachedRoomIdIconSprite == null)
-        {
-            cachedRoomIdIconSprite = AssetDatabase.LoadAssetAtPath<Sprite>(RoomIdIconSpritePath);
-        }
-
-        return cachedRoomIdIconSprite;
-#else
-        return null;
-#endif
+        return roomIdText;
     }
 
     private static void ApplyMapThumbnailVisual(Transform itemRoot)
@@ -601,6 +606,26 @@ public class RoomBrowserScreenBinder : MonoBehaviour
         mapRect.sizeDelta = MapSize;
     }
 
+    private static void ApplyJoinButtonVisual(Button joinButton)
+    {
+        if (joinButton == null)
+        {
+            return;
+        }
+
+        RectTransform rect = joinButton.GetComponent<RectTransform>();
+        if (rect == null)
+        {
+            return;
+        }
+
+        rect.anchorMin = new Vector2(1f, 0.5f);
+        rect.anchorMax = new Vector2(1f, 0.5f);
+        rect.pivot = new Vector2(1f, 0.5f);
+        rect.anchoredPosition = JoinButtonAnchoredPosition;
+        rect.sizeDelta = JoinButtonSize;
+    }
+
     private static void DestroyForCurrentMode(GameObject target)
     {
         if (target == null)
@@ -615,16 +640,6 @@ public class RoomBrowserScreenBinder : MonoBehaviour
         }
 
         Destroy(target);
-    }
-
-    private static void CopyRoomIdToClipboard(string roomId)
-    {
-        if (string.IsNullOrWhiteSpace(roomId))
-        {
-            return;
-        }
-
-        GUIUtility.systemCopyBuffer = roomId;
     }
 
     private void PrepareContentRootLayout(int rowCount)

@@ -6,6 +6,7 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
     [SerializeField] private GameObject roomBrowserScreen;
     [SerializeField] private GameObject createRoomScreen;
     [SerializeField] private GameObject currentRoomScreen;
+    [SerializeField] private RoomBrowserScreenBinder roomBrowserScreenBinder;
     [SerializeField] private Button createRoomButton;
     [SerializeField] private Button createButton;
     [SerializeField] private Button backButton;
@@ -45,8 +46,8 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
 
         if (leaveButton != null)
         {
-            leaveButton.onClick.RemoveListener(ShowRoomBrowser);
-            leaveButton.onClick.AddListener(ShowRoomBrowser);
+            leaveButton.onClick.RemoveListener(OnLeaveButtonClicked);
+            leaveButton.onClick.AddListener(OnLeaveButtonClicked);
         }
     }
 
@@ -69,7 +70,7 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
 
         if (leaveButton != null)
         {
-            leaveButton.onClick.RemoveListener(ShowRoomBrowser);
+            leaveButton.onClick.RemoveListener(OnLeaveButtonClicked);
         }
     }
 
@@ -90,6 +91,11 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
         if (currentRoomScreen == null)
         {
             currentRoomScreen = FindGameObjectByName(allTransforms, "CurrentRoomScreen");
+        }
+
+        if (roomBrowserScreenBinder == null && roomBrowserScreen != null)
+        {
+            roomBrowserScreenBinder = roomBrowserScreen.GetComponentInChildren<RoomBrowserScreenBinder>(true);
         }
 
         if (createRoomButton == null)
@@ -158,6 +164,16 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
         {
             currentRoomScreen.SetActive(false);
         }
+
+        if (roomBrowserScreenBinder == null && roomBrowserScreen != null)
+        {
+            roomBrowserScreenBinder = roomBrowserScreen.GetComponentInChildren<RoomBrowserScreenBinder>(true);
+        }
+
+        if (roomBrowserScreenBinder != null)
+        {
+            roomBrowserScreenBinder.RefreshRoomList();
+        }
     }
 
     public void ShowRoomBrowser()
@@ -195,6 +211,22 @@ public class LobbyMockScreenSwitcher : MonoBehaviour
         if (currentRoomScreen != null)
         {
             currentRoomScreen.SetActive(true);
+        }
+    }
+
+    private void OnLeaveButtonClicked()
+    {
+        LobbyStateStore.Local.LeaveCurrentRoomAsLocalPlayer();
+        ShowRoomBrowser();
+
+        if (roomBrowserScreenBinder == null && roomBrowserScreen != null)
+        {
+            roomBrowserScreenBinder = roomBrowserScreen.GetComponentInChildren<RoomBrowserScreenBinder>(true);
+        }
+
+        if (roomBrowserScreenBinder != null)
+        {
+            roomBrowserScreenBinder.RefreshRoomList();
         }
     }
 }

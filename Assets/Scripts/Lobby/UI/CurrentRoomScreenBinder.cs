@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -18,6 +19,8 @@ public class CurrentRoomScreenBinder : MonoBehaviour
     [SerializeField] private TMP_Text roomIdText;
     [SerializeField] private Button copyRoomIdButton;
     [SerializeField] private Button startGameButton;
+    [SerializeField] private Image startGameButtonImage;
+    [SerializeField] private TMP_Text startGameButtonText;
     [SerializeField] private TMP_Text roomPlayerCountText;
     [SerializeField] private TMP_Text sidePlayerCountText;
     [SerializeField] private TMP_Text sideRewardText;
@@ -26,6 +29,8 @@ public class CurrentRoomScreenBinder : MonoBehaviour
     [SerializeField] private Button playerSlot01StatusButton;
     [SerializeField] private Image playerSlot01StatusButtonImage;
     [SerializeField] private TMP_Text playerSlot01StatusText;
+    [SerializeField] private TMP_Text playerSlot01NameText;
+    [SerializeField] private TMP_Text playerSlot01HostBadgeText;
     [SerializeField] private Sprite hostReadyButtonSprite;
     [SerializeField] private Sprite hostNotReadyButtonSprite;
     [SerializeField] [Range(0f, 1f)] private float sideMapPreviewAlpha = 1f;
@@ -42,6 +47,14 @@ public class CurrentRoomScreenBinder : MonoBehaviour
     [SerializeField] private Color hostNotReadyButtonTint = new Color(0.62f, 0.66f, 0.73f, 0.95f);
     [SerializeField] private Color emptyStateButtonTint = new Color(0.62f, 0.66f, 0.73f, 0.85f);
     [SerializeField] private Color lockedStateButtonTint = new Color(0.52f, 0.56f, 0.62f, 0.75f);
+    [SerializeField] private Color startGameEnabledTint = Color.white;
+    [SerializeField] private Color startGameDisabledTint = new Color(0.52f, 0.56f, 0.62f, 0.92f);
+    [SerializeField] private Color startGameEnabledTextColor = Color.white;
+    [SerializeField] private Color startGameDisabledTextColor = new Color(0.84f, 0.88f, 0.94f, 0.95f);
+    [SerializeField] private string localPlayerFallbackName = "Player";
+    [SerializeField] private string localPlayerHostBadgeLabel = "Host";
+    [SerializeField] private Color localPlayerNameColor = Color.white;
+    [SerializeField] private Color localPlayerHostBadgeColor = new Color(0.77f, 0.92f, 0.56f, 1f);
     [SerializeField] private string copyTooltipMessage = "Copied";
     [SerializeField] private float copyTooltipDuration = 1.2f;
     [SerializeField] private Vector2 copyTooltipSize = new Vector2(120f, 34f);
@@ -54,16 +67,16 @@ public class CurrentRoomScreenBinder : MonoBehaviour
 
     private static readonly Color[] SideMapPreviewPalette =
     {
-        new Color(0.16f, 0.55f, 0.76f, 1f),
-        new Color(0.34f, 0.63f, 0.36f, 1f),
-        new Color(0.15f, 0.72f, 0.58f, 1f),
-        new Color(0.12f, 0.57f, 0.77f, 1f),
-        new Color(0.17f, 0.52f, 0.70f, 1f),
-        new Color(0.21f, 0.73f, 0.43f, 1f),
-        new Color(0.16f, 0.61f, 0.80f, 1f),
-        new Color(0.29f, 0.68f, 0.41f, 1f),
-        new Color(0.14f, 0.51f, 0.75f, 1f),
-        new Color(0.20f, 0.66f, 0.50f, 1f)
+        new Color(0.17f, 0.58f, 0.85f, 1f),
+        new Color(0.32f, 0.70f, 0.33f, 1f),
+        new Color(0.82f, 0.56f, 0.20f, 1f),
+        new Color(0.48f, 0.36f, 0.80f, 1f),
+        new Color(0.80f, 0.33f, 0.53f, 1f),
+        new Color(0.20f, 0.69f, 0.63f, 1f),
+        new Color(0.77f, 0.32f, 0.32f, 1f),
+        new Color(0.56f, 0.66f, 0.24f, 1f),
+        new Color(0.25f, 0.44f, 0.82f, 1f),
+        new Color(0.76f, 0.49f, 0.24f, 1f)
     };
 
     private LobbyStateStore SharedStore => LobbyStateStore.Local;
@@ -97,7 +110,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
 #if UNITY_EDITOR
     private void OnValidate()
     {
-        AutoAssignReferences();
+        AutoAssignReferences(false);
     }
 #endif
 
@@ -117,8 +130,9 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             1,
             Mathf.Max(1, playerSlots != null ? playerSlots.Length : DefaultSlotCount));
         int safeTreasureCount = Mathf.Max(0, currentRoom.treasureCount);
-        int playerCount = currentRoom.players != null ? currentRoom.players.Count : 0;
-        int safePlayerCount = Mathf.Clamp(playerCount, 0, safeMaxPlayers);
+        int rawPlayerCount = currentRoom.players != null ? currentRoom.players.Count : 0;
+        int safePlayerCount = Mathf.Max(0, rawPlayerCount);
+        int clampedPlayerCount = Mathf.Clamp(safePlayerCount, 0, safeMaxPlayers);
 
         if (roomNameText != null)
         {
@@ -146,7 +160,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         }
 
         ApplyStartGameButtonState(safePlayerCount);
-        ApplyPlayerSlotsVisuals(currentRoom, safePlayerCount, safeMaxPlayers);
+        ApplyPlayerSlotsVisuals(currentRoom, clampedPlayerCount, safeMaxPlayers);
         ApplySideMapPreviewVisual(currentRoom.selectedMapIndex);
     }
 
@@ -174,7 +188,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
 
         if (sideRewardText != null)
         {
-            sideRewardText.text = "x2";
+            sideRewardText.text = "x0";
         }
 
         ApplyStartGameButtonState(0);
@@ -189,7 +203,40 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             return;
         }
 
-        startGameButton.interactable = playerCount >= 2;
+        bool canStart = playerCount >= 2;
+        startGameButton.interactable = canStart;
+
+        if (startGameButtonImage == null)
+        {
+            startGameButtonImage = startGameButton.GetComponent<Image>();
+        }
+
+        if (startGameButtonText == null)
+        {
+            startGameButtonText = startGameButton.GetComponentInChildren<TMP_Text>(true);
+        }
+
+        ColorBlock colors = startGameButton.colors;
+        colors.normalColor = startGameEnabledTint;
+        colors.highlightedColor = startGameEnabledTint;
+        colors.pressedColor = new Color(
+            Mathf.Clamp01(startGameEnabledTint.r * 0.9f),
+            Mathf.Clamp01(startGameEnabledTint.g * 0.9f),
+            Mathf.Clamp01(startGameEnabledTint.b * 0.9f),
+            startGameEnabledTint.a);
+        colors.selectedColor = startGameEnabledTint;
+        colors.disabledColor = startGameDisabledTint;
+        startGameButton.colors = colors;
+
+        if (startGameButtonImage != null)
+        {
+            startGameButtonImage.color = canStart ? startGameEnabledTint : startGameDisabledTint;
+        }
+
+        if (startGameButtonText != null)
+        {
+            startGameButtonText.color = canStart ? startGameEnabledTextColor : startGameDisabledTextColor;
+        }
     }
 
     private void ApplyPlayerSlotsVisuals(RoomState currentRoom, int playerCount, int maxPlayers)
@@ -199,9 +246,11 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             return;
         }
 
-        PlayerState localHostPlayer = FindLocalHostPlayer(currentRoom);
+        string localPlayerId = SharedStore.LocalPlayer != null ? SharedStore.LocalPlayer.playerId : string.Empty;
+        PlayerState localPlayer = FindLocalPlayer(currentRoom, localPlayerId);
         int safeMaxPlayers = Mathf.Clamp(maxPlayers, 0, playerSlots.Length);
-        int safePlayerCount = Mathf.Clamp(playerCount, 0, safeMaxPlayers);
+        List<PlayerState> slotPlayers = BuildSlotPlayers(currentRoom, localPlayer, safeMaxPlayers);
+        int occupiedSlotCount = Mathf.Clamp(slotPlayers.Count, 0, safeMaxPlayers);
 
         for (int i = 0; i < playerSlots.Length; i++)
         {
@@ -211,15 +260,23 @@ public class CurrentRoomScreenBinder : MonoBehaviour
                 continue;
             }
 
-            PlayerState slotPlayer = GetPlayerForSlot(currentRoom, localHostPlayer, i);
-
-            if (i == 0 && safePlayerCount > 0 && localHostPlayer != null)
+            if (i == 0)
             {
-                ApplyLocalHostSlotVisual(slot, localHostPlayer.isReady);
+                ClearLocalPlayerIdentity();
             }
-            else if (i < safePlayerCount)
+
+            if (i < occupiedSlotCount)
             {
-                ApplyOtherPlayerSlotVisual(slot, slotPlayer != null && slotPlayer.isReady);
+                PlayerState slotPlayer = slotPlayers[i];
+                bool isLocalSlot = localPlayer != null && AreSamePlayer(slotPlayer, localPlayer);
+                if (i == 0 && isLocalSlot)
+                {
+                    ApplyLocalPlayerSlotVisual(slot, slotPlayer);
+                }
+                else
+                {
+                    ApplyOtherPlayerSlotVisual(slot, slotPlayer != null && slotPlayer.isReady);
+                }
             }
             else if (i < safeMaxPlayers)
             {
@@ -232,50 +289,65 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         }
     }
 
-    private static PlayerState GetPlayerForSlot(RoomState currentRoom, PlayerState localHostPlayer, int slotIndex)
+    private static List<PlayerState> BuildSlotPlayers(RoomState currentRoom, PlayerState localPlayer, int maxSlots)
     {
-        if (currentRoom == null || currentRoom.players == null || slotIndex < 0)
+        List<PlayerState> slotPlayers = new List<PlayerState>();
+        if (currentRoom == null || currentRoom.players == null || maxSlots <= 0)
         {
-            return null;
+            return slotPlayers;
         }
 
-        if (localHostPlayer == null)
+        if (localPlayer != null)
         {
-            return slotIndex < currentRoom.players.Count ? currentRoom.players[slotIndex] : null;
+            slotPlayers.Add(localPlayer);
         }
 
-        if (slotIndex == 0)
-        {
-            return localHostPlayer;
-        }
-
-        int targetNonHostIndex = slotIndex - 1;
-        int currentNonHostIndex = 0;
         for (int i = 0; i < currentRoom.players.Count; i++)
         {
             PlayerState candidate = currentRoom.players[i];
-            if (candidate == null || candidate.isHost)
+            if (candidate == null)
             {
                 continue;
             }
 
-            if (currentNonHostIndex == targetNonHostIndex)
+            if (localPlayer != null && AreSamePlayer(candidate, localPlayer))
             {
-                return candidate;
+                continue;
             }
 
-            currentNonHostIndex++;
+            slotPlayers.Add(candidate);
+            if (slotPlayers.Count >= maxSlots)
+            {
+                break;
+            }
         }
 
-        return null;
+        return slotPlayers;
     }
 
-    private void ApplyLocalHostSlotVisual(GameObject slot, bool isReady)
+    private static bool AreSamePlayer(PlayerState first, PlayerState second)
+    {
+        if (first == null || second == null)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(first.playerId) && !string.IsNullOrWhiteSpace(second.playerId))
+        {
+            return first.playerId == second.playerId;
+        }
+
+        return ReferenceEquals(first, second);
+    }
+
+    private void ApplyLocalPlayerSlotVisual(GameObject slot, PlayerState localPlayer)
     {
         if (slot == null)
         {
             return;
         }
+
+        bool isReady = localPlayer != null && localPlayer.isReady;
 
         Image slotBackground = slot.GetComponent<Image>();
         Transform avatarTransform = slot.transform.Find("AvatarPlaceholder");
@@ -315,6 +387,8 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         {
             statusButton.interactable = true;
         }
+
+        ApplyLocalPlayerIdentity(localPlayer);
     }
 
     private void ApplyOtherPlayerSlotVisual(GameObject slot, bool isReady)
@@ -479,6 +553,20 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         Color previewColor = SideMapPreviewPalette[safeIndex];
         previewColor.a = Mathf.Clamp01(sideMapPreviewAlpha);
         sideMapPreview.color = previewColor;
+
+        Outline previewOutline = sideMapPreview.GetComponent<Outline>();
+        if (previewOutline == null)
+        {
+            previewOutline = sideMapPreview.gameObject.AddComponent<Outline>();
+        }
+
+        previewOutline.effectDistance = new Vector2(2f, -2f);
+        previewOutline.useGraphicAlpha = true;
+        previewOutline.effectColor = new Color(
+            Mathf.Clamp01(previewColor.r * 0.45f),
+            Mathf.Clamp01(previewColor.g * 0.45f),
+            Mathf.Clamp01(previewColor.b * 0.45f),
+            0.95f);
     }
 
     private void BindUiEvents()
@@ -512,13 +600,14 @@ public class CurrentRoomScreenBinder : MonoBehaviour
     private void OnPlayerSlot01StatusClicked()
     {
         RoomState currentRoom = SharedStore.CurrentRoom;
-        PlayerState localHostPlayer = FindLocalHostPlayer(currentRoom);
-        if (currentRoom == null || localHostPlayer == null)
+        string localPlayerId = SharedStore.LocalPlayer != null ? SharedStore.LocalPlayer.playerId : string.Empty;
+        PlayerState localPlayer = FindLocalPlayer(currentRoom, localPlayerId);
+        if (currentRoom == null || localPlayer == null)
         {
             return;
         }
 
-        localHostPlayer.isReady = !localHostPlayer.isReady;
+        localPlayer.isReady = !localPlayer.isReady;
         ApplyCurrentRoomToUi();
     }
 
@@ -630,11 +719,23 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         copyTooltipText = label;
     }
 
-    private static PlayerState FindLocalHostPlayer(RoomState currentRoom)
+    private static PlayerState FindLocalPlayer(RoomState currentRoom, string localPlayerId)
     {
         if (currentRoom == null || currentRoom.players == null)
         {
             return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(localPlayerId))
+        {
+            for (int i = 0; i < currentRoom.players.Count; i++)
+            {
+                PlayerState player = currentRoom.players[i];
+                if (player != null && player.playerId == localPlayerId)
+                {
+                    return player;
+                }
+            }
         }
 
         for (int i = 0; i < currentRoom.players.Count; i++)
@@ -649,7 +750,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         return null;
     }
 
-    private void AutoAssignReferences()
+    private void AutoAssignReferences(bool allowCreateGeneratedUi = true)
     {
         Transform[] allTransforms = transform.GetComponentsInChildren<Transform>(true);
 
@@ -676,6 +777,16 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         if (startGameButton == null)
         {
             startGameButton = FindButtonByName(allTransforms, "StartGameButton");
+        }
+
+        if (startGameButtonImage == null && startGameButton != null)
+        {
+            startGameButtonImage = startGameButton.GetComponent<Image>();
+        }
+
+        if (startGameButtonText == null && startGameButton != null)
+        {
+            startGameButtonText = startGameButton.GetComponentInChildren<TMP_Text>(true);
         }
 
         if (roomPlayerCountText == null)
@@ -726,7 +837,168 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             }
         }
 
+        EnsurePlayerSlot01IdentityTexts(allowCreateGeneratedUi);
         EnsureHostStatusSprites();
+    }
+
+    private void EnsurePlayerSlot01IdentityTexts(bool allowCreateGeneratedUi = true)
+    {
+        if (playerSlots == null || playerSlots.Length == 0 || playerSlots[0] == null)
+        {
+            return;
+        }
+
+        Transform slotRoot = playerSlots[0].transform;
+        if (playerSlot01NameText == null)
+        {
+            Transform existingName = slotRoot.Find("PlayerNameText");
+            if (existingName != null)
+            {
+                playerSlot01NameText = existingName.GetComponent<TMP_Text>();
+            }
+        }
+
+        if (playerSlot01HostBadgeText == null)
+        {
+            Transform existingHostBadge = slotRoot.Find("HostBadgeText");
+            if (existingHostBadge != null)
+            {
+                playerSlot01HostBadgeText = existingHostBadge.GetComponent<TMP_Text>();
+            }
+        }
+
+        if (playerSlot01NameText == null && allowCreateGeneratedUi)
+        {
+            playerSlot01NameText = CreateSlotIdentityText(slotRoot, "PlayerNameText", new Vector2(14f, -12f), new Vector2(200f, 24f), 16f);
+        }
+
+        if (playerSlot01HostBadgeText == null && allowCreateGeneratedUi)
+        {
+            playerSlot01HostBadgeText = CreateSlotIdentityText(slotRoot, "HostBadgeText", new Vector2(14f, -32f), new Vector2(120f, 20f), 14f);
+        }
+
+        if (playerSlot01NameText != null)
+        {
+            playerSlot01NameText.color = localPlayerNameColor;
+            playerSlot01NameText.fontStyle = FontStyles.Bold;
+            playerSlot01NameText.alignment = TextAlignmentOptions.MidlineLeft;
+            playerSlot01NameText.overflowMode = TextOverflowModes.Ellipsis;
+            playerSlot01NameText.enableWordWrapping = false;
+            playerSlot01NameText.raycastTarget = false;
+        }
+
+        if (playerSlot01HostBadgeText != null)
+        {
+            playerSlot01HostBadgeText.color = localPlayerHostBadgeColor;
+            playerSlot01HostBadgeText.fontStyle = FontStyles.Bold;
+            playerSlot01HostBadgeText.alignment = TextAlignmentOptions.MidlineLeft;
+            playerSlot01HostBadgeText.overflowMode = TextOverflowModes.Ellipsis;
+            playerSlot01HostBadgeText.enableWordWrapping = false;
+            playerSlot01HostBadgeText.raycastTarget = false;
+        }
+
+        TMP_FontAsset fallbackFont = playerSlot01StatusText != null ? playerSlot01StatusText.font : null;
+        if (fallbackFont != null)
+        {
+            if (playerSlot01NameText != null && playerSlot01NameText.font == null)
+            {
+                playerSlot01NameText.font = fallbackFont;
+            }
+
+            if (playerSlot01HostBadgeText != null && playerSlot01HostBadgeText.font == null)
+            {
+                playerSlot01HostBadgeText.font = fallbackFont;
+            }
+        }
+    }
+
+    private static TMP_Text CreateSlotIdentityText(
+        Transform parent,
+        string objectName,
+        Vector2 anchoredPosition,
+        Vector2 sizeDelta,
+        float fontSize)
+    {
+        GameObject textObject = new GameObject(objectName, typeof(RectTransform), typeof(TextMeshProUGUI));
+        textObject.transform.SetParent(parent, false);
+
+        RectTransform rectTransform = textObject.GetComponent<RectTransform>();
+        rectTransform.anchorMin = new Vector2(0f, 1f);
+        rectTransform.anchorMax = new Vector2(0f, 1f);
+        rectTransform.pivot = new Vector2(0f, 1f);
+        rectTransform.anchoredPosition = anchoredPosition;
+        rectTransform.sizeDelta = sizeDelta;
+
+        TextMeshProUGUI text = textObject.GetComponent<TextMeshProUGUI>();
+        text.fontSize = fontSize;
+        text.text = string.Empty;
+        return text;
+    }
+
+    private void ApplyLocalPlayerIdentity(PlayerState localPlayer)
+    {
+        EnsurePlayerSlot01IdentityTexts();
+
+        if (playerSlot01NameText == null || playerSlot01HostBadgeText == null)
+        {
+            return;
+        }
+
+        if (localPlayer == null)
+        {
+            ClearLocalPlayerIdentity();
+            return;
+        }
+
+        string displayName = ResolveLocalPlayerDisplayName(localPlayer);
+
+        playerSlot01NameText.text = displayName;
+        playerSlot01NameText.gameObject.SetActive(true);
+
+        bool isHost = localPlayer.isHost;
+        playerSlot01HostBadgeText.text = isHost ? localPlayerHostBadgeLabel : string.Empty;
+        playerSlot01HostBadgeText.gameObject.SetActive(isHost);
+    }
+
+    private string ResolveLocalPlayerDisplayName(PlayerState localPlayer)
+    {
+        if (localPlayer != null)
+        {
+            string playerName = localPlayer.displayName != null ? localPlayer.displayName.Trim() : string.Empty;
+            if (!string.IsNullOrWhiteSpace(playerName))
+            {
+                return playerName;
+            }
+        }
+
+        if (SharedStore.LocalPlayer != null)
+        {
+            string localProfileName = SharedStore.LocalPlayer.displayName != null
+                ? SharedStore.LocalPlayer.displayName.Trim()
+                : string.Empty;
+            if (!string.IsNullOrWhiteSpace(localProfileName))
+            {
+                return localProfileName;
+            }
+        }
+
+        string configuredFallback = localPlayerFallbackName != null ? localPlayerFallbackName.Trim() : string.Empty;
+        return string.IsNullOrWhiteSpace(configuredFallback) ? "Player" : configuredFallback;
+    }
+
+    private void ClearLocalPlayerIdentity()
+    {
+        if (playerSlot01NameText != null)
+        {
+            playerSlot01NameText.text = string.Empty;
+            playerSlot01NameText.gameObject.SetActive(false);
+        }
+
+        if (playerSlot01HostBadgeText != null)
+        {
+            playerSlot01HostBadgeText.text = string.Empty;
+            playerSlot01HostBadgeText.gameObject.SetActive(false);
+        }
     }
 
     private void EnsureHostStatusSprites()
