@@ -1,6 +1,10 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using TMPro;
+using Unity.Services.Lobbies;
+using Unity.Services.Lobbies.Models;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -60,10 +64,28 @@ public class CurrentRoomScreenBinder : MonoBehaviour
     [SerializeField] private Vector2 copyTooltipSize = new Vector2(120f, 34f);
     [SerializeField] private Color copyTooltipBackgroundColor = new Color(0.19f, 0.70f, 0.29f, 0.96f);
     [SerializeField] private Color copyTooltipTextColor = Color.white;
+    [SerializeField] private bool enableLobbyEventTracking = true;
+    [SerializeField] private float fallbackLobbyRefreshIntervalSeconds = 2.5f;
+    [SerializeField] private LobbyMockScreenSwitcher screenSwitcher;
+    [SerializeField] private RoomBrowserScreenBinder roomBrowserScreenBinder;
+    [SerializeField] private GameObject roomBrowserScreen;
+    [SerializeField] private GameObject createRoomScreen;
+    [SerializeField] private GameObject currentRoomScreen;
 
     private GameObject copyTooltipObject;
     private TMP_Text copyTooltipText;
     private Coroutine copyTooltipHideRoutine;
+    private Coroutine fallbackLobbyRefreshCoroutine;
+    private UnityLobbyService lobbyService;
+    private bool isFallbackLobbyRefreshInProgress;
+    private bool isLobbyEventsSubscriptionInProgress;
+    private bool hasHandledMissingLobby;
+    private ILobbyEvents lobbyEventsSubscription;
+    private LobbyEventCallbacks lobbyEventCallbacks;
+    private string subscribedLobbyId = string.Empty;
+    private LobbyEventConnectionState lobbyEventConnectionState = LobbyEventConnectionState.Unknown;
+    private readonly Queue<Action> mainThreadActions = new Queue<Action>();
+    private readonly object mainThreadActionsLock = new object();
 
     private static readonly Color[] SideMapPreviewPalette =
     {
@@ -83,6 +105,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
 
     private void Awake()
     {
+        lobbyService = new UnityLobbyService();
         AutoAssignReferences();
         BindUiEvents();
         ApplyCurrentRoomToUi();
@@ -93,6 +116,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         AutoAssignReferences();
         BindUiEvents();
         ApplyCurrentRoomToUi();
+        StartLobbyTrackingLoop();
     }
 
     private void Start()
@@ -102,8 +126,19 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         ApplyCurrentRoomToUi();
     }
 
+    private void OnDisable()
+    {
+        StopLobbyTrackingLoop();
+    }
+
+    private void Update()
+    {
+        FlushMainThreadActions();
+    }
+
     private void OnDestroy()
     {
+        StopLobbyTrackingLoop();
         UnbindUiEvents();
     }
 
@@ -113,6 +148,374 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         AutoAssignReferences(false);
     }
 #endif
+
+    private void StartLobbyTrackingLoop()
+    {
+        if (!Application.isPlaying || !enableLobbyEventTracking)
+        {
+            return;
+        }
+
+        StopLobbyTrackingLoop();
+        hasHandledMissingLobby = false;
+        TryStartLobbyEventsSubscriptionAsync();
+        TryRefreshCurrentLobbyAsync();
+        fallbackLobbyRefreshCoroutine = StartCoroutine(FallbackLobbyRefreshCoroutine());
+    }
+
+    private void StopLobbyTrackingLoop()
+    {
+        if (fallbackLobbyRefreshCoroutine != null)
+        {
+            StopCoroutine(fallbackLobbyRefreshCoroutine);
+            fallbackLobbyRefreshCoroutine = null;
+        }
+
+        isFallbackLobbyRefreshInProgress = false;
+        TryStopLobbyEventsSubscriptionAsync();
+    }
+
+    private IEnumerator FallbackLobbyRefreshCoroutine()
+    {
+        float safeInterval = Mathf.Max(1f, fallbackLobbyRefreshIntervalSeconds);
+        WaitForSeconds waitForInterval = new WaitForSeconds(safeInterval);
+
+        while (isActiveAndEnabled && gameObject.activeInHierarchy)
+        {
+            yield return waitForInterval;
+
+            if (!HasCurrentLobbyId())
+            {
+                continue;
+            }
+
+            if (!HasActiveLobbyEventsSubscription())
+            {
+                TryStartLobbyEventsSubscriptionAsync();
+            }
+
+            TryRefreshCurrentLobbyAsync();
+        }
+
+        fallbackLobbyRefreshCoroutine = null;
+    }
+
+    private bool HasActiveLobbyEventsSubscription()
+    {
+        string currentLobbyId = SharedStore.CurrentRoom != null && SharedStore.CurrentRoom.roomId != null
+            ? SharedStore.CurrentRoom.roomId.Trim()
+            : string.Empty;
+
+        return lobbyEventsSubscription != null &&
+               !string.IsNullOrWhiteSpace(subscribedLobbyId) &&
+               string.Equals(subscribedLobbyId, currentLobbyId, StringComparison.Ordinal) &&
+               lobbyEventConnectionState != LobbyEventConnectionState.Unsubscribed;
+    }
+
+    private bool HasCurrentLobbyId()
+    {
+        RoomState currentRoom = SharedStore.CurrentRoom;
+        return currentRoom != null && !string.IsNullOrWhiteSpace(currentRoom.roomId);
+    }
+
+    private static bool IsAuthReadyForLobbySync()
+    {
+        AuthStateStore authStore = AuthStateStore.Local;
+        return authStore != null && authStore.IsAuthenticated;
+    }
+
+    private async void TryStartLobbyEventsSubscriptionAsync()
+    {
+        await StartLobbyEventsSubscriptionAsync();
+    }
+
+    private async Task StartLobbyEventsSubscriptionAsync()
+    {
+        if (!Application.isPlaying || !enableLobbyEventTracking || isLobbyEventsSubscriptionInProgress)
+        {
+            return;
+        }
+
+        if (!IsAuthReadyForLobbySync())
+        {
+            return;
+        }
+
+        RoomState currentRoom = SharedStore.CurrentRoom;
+        string lobbyId = currentRoom != null && currentRoom.roomId != null ? currentRoom.roomId.Trim() : string.Empty;
+        if (string.IsNullOrWhiteSpace(lobbyId))
+        {
+            return;
+        }
+
+        if (lobbyEventsSubscription != null &&
+            string.Equals(subscribedLobbyId, lobbyId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        isLobbyEventsSubscriptionInProgress = true;
+        try
+        {
+            await StopLobbyEventsSubscriptionAsync();
+
+            lobbyEventCallbacks = new LobbyEventCallbacks();
+            lobbyEventCallbacks.LobbyChanged += OnLobbyChangedEventReceived;
+            lobbyEventCallbacks.LobbyDeleted += OnLobbyDeletedEventReceived;
+            lobbyEventCallbacks.KickedFromLobby += OnKickedFromLobbyEventReceived;
+            lobbyEventCallbacks.LobbyEventConnectionStateChanged += OnLobbyConnectionStateChanged;
+
+            lobbyEventsSubscription = await LobbyService.Instance.SubscribeToLobbyEventsAsync(lobbyId, lobbyEventCallbacks);
+            subscribedLobbyId = lobbyId;
+            lobbyEventConnectionState = LobbyEventConnectionState.Subscribing;
+            hasHandledMissingLobby = false;
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning($"CurrentRoomScreenBinder: Lobby events subscribe failed safely. {exception.Message}");
+            await StopLobbyEventsSubscriptionAsync();
+        }
+        finally
+        {
+            isLobbyEventsSubscriptionInProgress = false;
+        }
+    }
+
+    private async void TryStopLobbyEventsSubscriptionAsync()
+    {
+        await StopLobbyEventsSubscriptionAsync();
+    }
+
+    private async Task StopLobbyEventsSubscriptionAsync()
+    {
+        ILobbyEvents subscriptionToStop = lobbyEventsSubscription;
+        LobbyEventCallbacks callbacksToDetach = lobbyEventCallbacks;
+
+        lobbyEventsSubscription = null;
+        lobbyEventCallbacks = null;
+        subscribedLobbyId = string.Empty;
+        lobbyEventConnectionState = LobbyEventConnectionState.Unsubscribed;
+
+        if (callbacksToDetach != null)
+        {
+            callbacksToDetach.LobbyChanged -= OnLobbyChangedEventReceived;
+            callbacksToDetach.LobbyDeleted -= OnLobbyDeletedEventReceived;
+            callbacksToDetach.KickedFromLobby -= OnKickedFromLobbyEventReceived;
+            callbacksToDetach.LobbyEventConnectionStateChanged -= OnLobbyConnectionStateChanged;
+        }
+
+        if (subscriptionToStop == null)
+        {
+            return;
+        }
+
+        try
+        {
+            await subscriptionToStop.UnsubscribeAsync();
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning($"CurrentRoomScreenBinder: Lobby events unsubscribe failed safely. {exception.Message}");
+        }
+    }
+
+    private void OnLobbyChangedEventReceived(ILobbyChanges _)
+    {
+        EnqueueMainThreadAction(HandleLobbyChangedOnMainThread);
+    }
+
+    private void HandleLobbyChangedOnMainThread()
+    {
+        if (!isActiveAndEnabled || !Application.isPlaying)
+        {
+            return;
+        }
+
+        TryRefreshCurrentLobbyAsync();
+    }
+
+    private void OnLobbyDeletedEventReceived()
+    {
+        EnqueueMainThreadAction(() => HandleLobbyNotFound("deleted"));
+    }
+
+    private void OnKickedFromLobbyEventReceived()
+    {
+        EnqueueMainThreadAction(() => HandleLobbyNotFound("kicked"));
+    }
+
+    private void OnLobbyConnectionStateChanged(LobbyEventConnectionState connectionState)
+    {
+        EnqueueMainThreadAction(() => HandleLobbyConnectionStateChangedOnMainThread(connectionState));
+    }
+
+    private void HandleLobbyConnectionStateChangedOnMainThread(LobbyEventConnectionState connectionState)
+    {
+        lobbyEventConnectionState = connectionState;
+
+        if (!isActiveAndEnabled || !Application.isPlaying)
+        {
+            return;
+        }
+
+        if (connectionState == LobbyEventConnectionState.Error ||
+            connectionState == LobbyEventConnectionState.Unsynced ||
+            connectionState == LobbyEventConnectionState.Unsubscribed)
+        {
+            TryStartLobbyEventsSubscriptionAsync();
+            TryRefreshCurrentLobbyAsync();
+        }
+    }
+
+    private async void TryRefreshCurrentLobbyAsync()
+    {
+        await RefreshCurrentLobbyAsync();
+    }
+
+    private async Task RefreshCurrentLobbyAsync()
+    {
+        if (!Application.isPlaying || isFallbackLobbyRefreshInProgress || hasHandledMissingLobby)
+        {
+            return;
+        }
+
+        if (!IsAuthReadyForLobbySync())
+        {
+            return;
+        }
+
+        RoomState currentRoom = SharedStore.CurrentRoom;
+        string lobbyId = currentRoom != null && currentRoom.roomId != null ? currentRoom.roomId.Trim() : string.Empty;
+        if (string.IsNullOrWhiteSpace(lobbyId))
+        {
+            return;
+        }
+
+        isFallbackLobbyRefreshInProgress = true;
+        try
+        {
+            if (lobbyService == null)
+            {
+                lobbyService = new UnityLobbyService();
+            }
+
+            Lobby lobby = await lobbyService.GetLobbyAsync(lobbyId);
+            if (lobby == null)
+            {
+                HandleLobbyNotFound("not found");
+                return;
+            }
+
+            hasHandledMissingLobby = false;
+            RoomState mappedRoom = lobbyService.MapLobbyToRoomState(lobby, false);
+            if (mappedRoom != null && SharedStore.ApplyMappedCurrentRoom(mappedRoom, true))
+            {
+                ApplyCurrentRoomToUi();
+            }
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning($"CurrentRoomScreenBinder: Lobby fallback refresh failed safely. {exception.Message}");
+        }
+        finally
+        {
+            isFallbackLobbyRefreshInProgress = false;
+        }
+    }
+
+    private void HandleLobbyNotFound(string reason)
+    {
+        if (hasHandledMissingLobby)
+        {
+            return;
+        }
+
+        hasHandledMissingLobby = true;
+        Debug.Log($"CurrentRoomScreenBinder: Current lobby is no longer available ({reason}). Returning to browser.");
+
+        SharedStore.ClearCurrentRoom();
+        TryStopLobbyEventsSubscriptionAsync();
+        NavigateBackToBrowser();
+    }
+
+    private void NavigateBackToBrowser()
+    {
+        AutoAssignReferences();
+
+        if (screenSwitcher != null)
+        {
+            screenSwitcher.ShowRoomBrowser();
+        }
+        else
+        {
+            if (createRoomScreen != null)
+            {
+                createRoomScreen.SetActive(false);
+            }
+
+            if (currentRoomScreen != null)
+            {
+                currentRoomScreen.SetActive(false);
+            }
+
+            if (roomBrowserScreen != null)
+            {
+                roomBrowserScreen.SetActive(true);
+            }
+        }
+
+        if (roomBrowserScreenBinder == null && roomBrowserScreen != null)
+        {
+            roomBrowserScreenBinder = roomBrowserScreen.GetComponentInChildren<RoomBrowserScreenBinder>(true);
+        }
+
+        if (roomBrowserScreenBinder != null)
+        {
+            roomBrowserScreenBinder.RefreshRoomList();
+        }
+    }
+
+    private void EnqueueMainThreadAction(Action action)
+    {
+        if (action == null)
+        {
+            return;
+        }
+
+        lock (mainThreadActionsLock)
+        {
+            mainThreadActions.Enqueue(action);
+        }
+    }
+
+    private void FlushMainThreadActions()
+    {
+        while (true)
+        {
+            Action action = null;
+            lock (mainThreadActionsLock)
+            {
+                if (mainThreadActions.Count > 0)
+                {
+                    action = mainThreadActions.Dequeue();
+                }
+            }
+
+            if (action == null)
+            {
+                break;
+            }
+
+            try
+            {
+                action.Invoke();
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning($"CurrentRoomScreenBinder: Main-thread event action failed safely. {exception.Message}");
+            }
+        }
+    }
 
     private void ApplyCurrentRoomToUi()
     {
@@ -807,6 +1210,31 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         if (sideMapPreview == null)
         {
             sideMapPreview = FindImageByName(allTransforms, "SideMapPreview");
+        }
+
+        if (screenSwitcher == null)
+        {
+            screenSwitcher = FindObjectOfType<LobbyMockScreenSwitcher>(true);
+        }
+
+        if (roomBrowserScreen == null)
+        {
+            roomBrowserScreen = FindGameObjectByName(allTransforms, "RoomBrowserScreen");
+        }
+
+        if (createRoomScreen == null)
+        {
+            createRoomScreen = FindGameObjectByName(allTransforms, "CreateRoomScreen");
+        }
+
+        if (currentRoomScreen == null)
+        {
+            currentRoomScreen = FindGameObjectByName(allTransforms, "CurrentRoomScreen");
+        }
+
+        if (roomBrowserScreenBinder == null && roomBrowserScreen != null)
+        {
+            roomBrowserScreenBinder = roomBrowserScreen.GetComponentInChildren<RoomBrowserScreenBinder>(true);
         }
 
         AssignSlotByName(allTransforms, "PlayerSlot01", 0);
