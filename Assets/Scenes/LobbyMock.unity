@@ -12547,8 +12547,8 @@ RectTransform:
   - {fileID: 910103402}
   m_Father: {fileID: 910100062}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0.03, y: 0.02}
-  m_AnchorMax: {x: 0.97, y: 0.98}
+  m_AnchorMin: {x: 0.02, y: 0.01}
+  m_AnchorMax: {x: 0.98, y: 0.99}
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
@@ -12624,8 +12624,8 @@ RectTransform:
   - {fileID: 910103122}
   m_Father: {fileID: 910103002}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0, y: 0.744}
-  m_AnchorMax: {x: 1, y: 0.97}
+  m_AnchorMin: {x: 0, y: 0.7485}
+  m_AnchorMax: {x: 1, y: 0.985}
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
@@ -12863,7 +12863,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: Ready
+  m_text: Confirmed
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_sharedMaterial: {fileID: 1413085262}
@@ -12979,8 +12979,8 @@ RectTransform:
   - {fileID: 910103222}
   m_Father: {fileID: 910103002}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0, y: 0.506}
-  m_AnchorMax: {x: 1, y: 0.732}
+  m_AnchorMin: {x: 0, y: 0.504}
+  m_AnchorMax: {x: 1, y: 0.7405}
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
@@ -13211,14 +13211,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Unity.TextMeshPro::TMPro.TextMeshProUGUI
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 0.8, b: 0.56, a: 1}
+  m_Color: {r: 0.78, g: 0.87, b: 0.95, a: 0.95}
   m_RaycastTarget: 0
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: Not Ready
+  m_text: Waiting
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_sharedMaterial: {fileID: 1413085262}
@@ -13230,7 +13230,7 @@ MonoBehaviour:
   m_fontColor32:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontColor: {r: 1, g: 0.8, b: 0.56, a: 1}
+  m_fontColor: {r: 0.78, g: 0.87, b: 0.95, a: 0.95}
   m_enableVertexGradient: 0
   m_colorMode: 3
   m_fontColorGradient:
@@ -13334,8 +13334,8 @@ RectTransform:
   - {fileID: 910103322}
   m_Father: {fileID: 910103002}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0, y: 0.268}
-  m_AnchorMax: {x: 1, y: 0.494}
+  m_AnchorMin: {x: 0, y: 0.2595}
+  m_AnchorMax: {x: 1, y: 0.496}
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
@@ -13573,7 +13573,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: Ready
+  m_text: Confirmed
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_sharedMaterial: {fileID: 1413085262}
@@ -13689,8 +13689,8 @@ RectTransform:
   - {fileID: 910103422}
   m_Father: {fileID: 910103002}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0, y: 0.03}
-  m_AnchorMax: {x: 1, y: 0.256}
+  m_AnchorMin: {x: 0, y: 0.015}
+  m_AnchorMax: {x: 1, y: 0.2515}
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
