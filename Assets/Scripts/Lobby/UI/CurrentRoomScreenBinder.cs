@@ -1,7 +1,12 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using TMPro;
+using Unity.Services.Lobbies;
+using Unity.Services.Lobbies.Models;
 using UnityEngine;
+using UnityEngine.Events;
 using UnityEngine.UI;
 
 public class CurrentRoomScreenBinder : MonoBehaviour
@@ -60,10 +65,30 @@ public class CurrentRoomScreenBinder : MonoBehaviour
     [SerializeField] private Vector2 copyTooltipSize = new Vector2(120f, 34f);
     [SerializeField] private Color copyTooltipBackgroundColor = new Color(0.19f, 0.70f, 0.29f, 0.96f);
     [SerializeField] private Color copyTooltipTextColor = Color.white;
+    [SerializeField] private bool enableLobbyEventTracking = true;
+    [SerializeField] private float fallbackLobbyRefreshIntervalSeconds = 2.5f;
+    [SerializeField] private LobbyMockScreenSwitcher screenSwitcher;
+    [SerializeField] private RoomBrowserScreenBinder roomBrowserScreenBinder;
+    [SerializeField] private GameObject roomBrowserScreen;
+    [SerializeField] private GameObject createRoomScreen;
+    [SerializeField] private GameObject currentRoomScreen;
 
     private GameObject copyTooltipObject;
     private TMP_Text copyTooltipText;
     private Coroutine copyTooltipHideRoutine;
+    private Coroutine fallbackLobbyRefreshCoroutine;
+    private UnityLobbyService lobbyService;
+    private bool isFallbackLobbyRefreshInProgress;
+    private bool isLobbyEventsSubscriptionInProgress;
+    private bool isReadySyncInProgress;
+    private bool hasHandledMissingLobby;
+    private ILobbyEvents lobbyEventsSubscription;
+    private LobbyEventCallbacks lobbyEventCallbacks;
+    private string subscribedLobbyId = string.Empty;
+    private LobbyEventConnectionState lobbyEventConnectionState = LobbyEventConnectionState.Unknown;
+    private readonly Queue<Action> mainThreadActions = new Queue<Action>();
+    private readonly object mainThreadActionsLock = new object();
+    private readonly UnityAction[] slotStatusButtonHandlers = new UnityAction[DefaultSlotCount];
 
     private static readonly Color[] SideMapPreviewPalette =
     {
@@ -83,6 +108,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
 
     private void Awake()
     {
+        lobbyService = new UnityLobbyService();
         AutoAssignReferences();
         BindUiEvents();
         ApplyCurrentRoomToUi();
@@ -93,6 +119,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         AutoAssignReferences();
         BindUiEvents();
         ApplyCurrentRoomToUi();
+        StartLobbyTrackingLoop();
     }
 
     private void Start()
@@ -102,8 +129,19 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         ApplyCurrentRoomToUi();
     }
 
+    private void OnDisable()
+    {
+        StopLobbyTrackingLoop();
+    }
+
+    private void Update()
+    {
+        FlushMainThreadActions();
+    }
+
     private void OnDestroy()
     {
+        StopLobbyTrackingLoop();
         UnbindUiEvents();
     }
 
@@ -113,6 +151,378 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         AutoAssignReferences(false);
     }
 #endif
+
+    private void StartLobbyTrackingLoop()
+    {
+        if (!Application.isPlaying || !enableLobbyEventTracking)
+        {
+            return;
+        }
+
+        StopLobbyTrackingLoop();
+        hasHandledMissingLobby = false;
+        TryStartLobbyEventsSubscriptionAsync();
+        TryRefreshCurrentLobbyAsync();
+        fallbackLobbyRefreshCoroutine = StartCoroutine(FallbackLobbyRefreshCoroutine());
+    }
+
+    private void StopLobbyTrackingLoop()
+    {
+        if (fallbackLobbyRefreshCoroutine != null)
+        {
+            StopCoroutine(fallbackLobbyRefreshCoroutine);
+            fallbackLobbyRefreshCoroutine = null;
+        }
+
+        isFallbackLobbyRefreshInProgress = false;
+        TryStopLobbyEventsSubscriptionAsync();
+    }
+
+    private IEnumerator FallbackLobbyRefreshCoroutine()
+    {
+        float safeInterval = Mathf.Max(1f, fallbackLobbyRefreshIntervalSeconds);
+        WaitForSeconds waitForInterval = new WaitForSeconds(safeInterval);
+
+        while (isActiveAndEnabled && gameObject.activeInHierarchy)
+        {
+            yield return waitForInterval;
+
+            if (!HasCurrentLobbyId())
+            {
+                continue;
+            }
+
+            if (!HasActiveLobbyEventsSubscription())
+            {
+                TryStartLobbyEventsSubscriptionAsync();
+            }
+
+            TryRefreshCurrentLobbyAsync();
+        }
+
+        fallbackLobbyRefreshCoroutine = null;
+    }
+
+    private bool HasActiveLobbyEventsSubscription()
+    {
+        string currentLobbyId = SharedStore.CurrentRoom != null && SharedStore.CurrentRoom.roomId != null
+            ? SharedStore.CurrentRoom.roomId.Trim()
+            : string.Empty;
+
+        return lobbyEventsSubscription != null &&
+               !string.IsNullOrWhiteSpace(subscribedLobbyId) &&
+               string.Equals(subscribedLobbyId, currentLobbyId, StringComparison.Ordinal) &&
+               lobbyEventConnectionState != LobbyEventConnectionState.Unsubscribed;
+    }
+
+    private bool HasCurrentLobbyId()
+    {
+        RoomState currentRoom = SharedStore.CurrentRoom;
+        return currentRoom != null && !string.IsNullOrWhiteSpace(currentRoom.roomId);
+    }
+
+    private static bool IsAuthReadyForLobbySync()
+    {
+        AuthStateStore authStore = AuthStateStore.Local;
+        return authStore != null && authStore.IsAuthenticated;
+    }
+
+    private async void TryStartLobbyEventsSubscriptionAsync()
+    {
+        await StartLobbyEventsSubscriptionAsync();
+    }
+
+    private async Task StartLobbyEventsSubscriptionAsync()
+    {
+        if (!Application.isPlaying || !enableLobbyEventTracking || isLobbyEventsSubscriptionInProgress)
+        {
+            return;
+        }
+
+        if (!IsAuthReadyForLobbySync())
+        {
+            return;
+        }
+
+        RoomState currentRoom = SharedStore.CurrentRoom;
+        string lobbyId = currentRoom != null && currentRoom.roomId != null ? currentRoom.roomId.Trim() : string.Empty;
+        if (string.IsNullOrWhiteSpace(lobbyId))
+        {
+            return;
+        }
+
+        if (lobbyEventsSubscription != null &&
+            string.Equals(subscribedLobbyId, lobbyId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        isLobbyEventsSubscriptionInProgress = true;
+        try
+        {
+            await StopLobbyEventsSubscriptionAsync();
+
+            lobbyEventCallbacks = new LobbyEventCallbacks();
+            lobbyEventCallbacks.LobbyChanged += OnLobbyChangedEventReceived;
+            lobbyEventCallbacks.LobbyDeleted += OnLobbyDeletedEventReceived;
+            lobbyEventCallbacks.KickedFromLobby += OnKickedFromLobbyEventReceived;
+            lobbyEventCallbacks.LobbyEventConnectionStateChanged += OnLobbyConnectionStateChanged;
+
+            lobbyEventsSubscription = await LobbyService.Instance.SubscribeToLobbyEventsAsync(lobbyId, lobbyEventCallbacks);
+            subscribedLobbyId = lobbyId;
+            lobbyEventConnectionState = LobbyEventConnectionState.Subscribing;
+            hasHandledMissingLobby = false;
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning($"CurrentRoomScreenBinder: Lobby events subscribe failed safely. {exception.Message}");
+            await StopLobbyEventsSubscriptionAsync();
+        }
+        finally
+        {
+            isLobbyEventsSubscriptionInProgress = false;
+        }
+    }
+
+    private async void TryStopLobbyEventsSubscriptionAsync()
+    {
+        await StopLobbyEventsSubscriptionAsync();
+    }
+
+    private async Task StopLobbyEventsSubscriptionAsync()
+    {
+        ILobbyEvents subscriptionToStop = lobbyEventsSubscription;
+        LobbyEventCallbacks callbacksToDetach = lobbyEventCallbacks;
+
+        lobbyEventsSubscription = null;
+        lobbyEventCallbacks = null;
+        subscribedLobbyId = string.Empty;
+        lobbyEventConnectionState = LobbyEventConnectionState.Unsubscribed;
+
+        if (callbacksToDetach != null)
+        {
+            callbacksToDetach.LobbyChanged -= OnLobbyChangedEventReceived;
+            callbacksToDetach.LobbyDeleted -= OnLobbyDeletedEventReceived;
+            callbacksToDetach.KickedFromLobby -= OnKickedFromLobbyEventReceived;
+            callbacksToDetach.LobbyEventConnectionStateChanged -= OnLobbyConnectionStateChanged;
+        }
+
+        if (subscriptionToStop == null)
+        {
+            return;
+        }
+
+        try
+        {
+            await subscriptionToStop.UnsubscribeAsync();
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning($"CurrentRoomScreenBinder: Lobby events unsubscribe failed safely. {exception.Message}");
+        }
+    }
+
+    private void OnLobbyChangedEventReceived(ILobbyChanges _)
+    {
+        EnqueueMainThreadAction(HandleLobbyChangedOnMainThread);
+    }
+
+    private void HandleLobbyChangedOnMainThread()
+    {
+        if (!isActiveAndEnabled || !Application.isPlaying)
+        {
+            return;
+        }
+
+        TryRefreshCurrentLobbyAsync();
+    }
+
+    private void OnLobbyDeletedEventReceived()
+    {
+        EnqueueMainThreadAction(() => HandleLobbyNotFound("deleted"));
+    }
+
+    private void OnKickedFromLobbyEventReceived()
+    {
+        EnqueueMainThreadAction(() => HandleLobbyNotFound("kicked"));
+    }
+
+    private void OnLobbyConnectionStateChanged(LobbyEventConnectionState connectionState)
+    {
+        EnqueueMainThreadAction(() => HandleLobbyConnectionStateChangedOnMainThread(connectionState));
+    }
+
+    private void HandleLobbyConnectionStateChangedOnMainThread(LobbyEventConnectionState connectionState)
+    {
+        lobbyEventConnectionState = connectionState;
+
+        if (!isActiveAndEnabled || !Application.isPlaying)
+        {
+            return;
+        }
+
+        if (connectionState == LobbyEventConnectionState.Error ||
+            connectionState == LobbyEventConnectionState.Unsynced ||
+            connectionState == LobbyEventConnectionState.Unsubscribed)
+        {
+            TryStartLobbyEventsSubscriptionAsync();
+            TryRefreshCurrentLobbyAsync();
+        }
+    }
+
+    private async void TryRefreshCurrentLobbyAsync()
+    {
+        await RefreshCurrentLobbyAsync();
+    }
+
+    private async Task RefreshCurrentLobbyAsync()
+    {
+        if (!Application.isPlaying || isFallbackLobbyRefreshInProgress || hasHandledMissingLobby)
+        {
+            return;
+        }
+
+        if (!IsAuthReadyForLobbySync())
+        {
+            return;
+        }
+
+        RoomState currentRoom = SharedStore.CurrentRoom;
+        string lobbyId = currentRoom != null && currentRoom.roomId != null ? currentRoom.roomId.Trim() : string.Empty;
+        if (string.IsNullOrWhiteSpace(lobbyId))
+        {
+            return;
+        }
+
+        isFallbackLobbyRefreshInProgress = true;
+        try
+        {
+            if (lobbyService == null)
+            {
+                lobbyService = new UnityLobbyService();
+            }
+
+            Lobby lobby = await lobbyService.GetLobbyAsync(lobbyId);
+            if (lobby == null)
+            {
+                if (lobbyService.LastGetLobbyWasNotFound)
+                {
+                    HandleLobbyNotFound("not found");
+                }
+
+                return;
+            }
+
+            hasHandledMissingLobby = false;
+            RoomState mappedRoom = lobbyService.MapLobbyToRoomState(lobby, false);
+            if (mappedRoom != null && SharedStore.ApplyMappedCurrentRoom(mappedRoom, true))
+            {
+                ApplyCurrentRoomToUi();
+            }
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning($"CurrentRoomScreenBinder: Lobby fallback refresh failed safely. {exception.Message}");
+        }
+        finally
+        {
+            isFallbackLobbyRefreshInProgress = false;
+        }
+    }
+
+    private void HandleLobbyNotFound(string reason)
+    {
+        if (hasHandledMissingLobby)
+        {
+            return;
+        }
+
+        hasHandledMissingLobby = true;
+        Debug.Log($"CurrentRoomScreenBinder: Current lobby is no longer available ({reason}). Returning to browser.");
+
+        SharedStore.ClearCurrentRoom();
+        TryStopLobbyEventsSubscriptionAsync();
+        NavigateBackToBrowser();
+    }
+
+    private void NavigateBackToBrowser()
+    {
+        AutoAssignReferences();
+
+        if (screenSwitcher != null)
+        {
+            screenSwitcher.ShowRoomBrowser();
+        }
+        else
+        {
+            if (createRoomScreen != null)
+            {
+                createRoomScreen.SetActive(false);
+            }
+
+            if (currentRoomScreen != null)
+            {
+                currentRoomScreen.SetActive(false);
+            }
+
+            if (roomBrowserScreen != null)
+            {
+                roomBrowserScreen.SetActive(true);
+            }
+        }
+
+        if (roomBrowserScreenBinder == null && roomBrowserScreen != null)
+        {
+            roomBrowserScreenBinder = roomBrowserScreen.GetComponentInChildren<RoomBrowserScreenBinder>(true);
+        }
+
+        if (roomBrowserScreenBinder != null)
+        {
+            roomBrowserScreenBinder.RefreshRoomList();
+        }
+    }
+
+    private void EnqueueMainThreadAction(Action action)
+    {
+        if (action == null)
+        {
+            return;
+        }
+
+        lock (mainThreadActionsLock)
+        {
+            mainThreadActions.Enqueue(action);
+        }
+    }
+
+    private void FlushMainThreadActions()
+    {
+        while (true)
+        {
+            Action action = null;
+            lock (mainThreadActionsLock)
+            {
+                if (mainThreadActions.Count > 0)
+                {
+                    action = mainThreadActions.Dequeue();
+                }
+            }
+
+            if (action == null)
+            {
+                break;
+            }
+
+            try
+            {
+                action.Invoke();
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning($"CurrentRoomScreenBinder: Main-thread event action failed safely. {exception.Message}");
+            }
+        }
+    }
 
     private void ApplyCurrentRoomToUi()
     {
@@ -249,7 +659,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         string localPlayerId = SharedStore.LocalPlayer != null ? SharedStore.LocalPlayer.playerId : string.Empty;
         PlayerState localPlayer = FindLocalPlayer(currentRoom, localPlayerId);
         int safeMaxPlayers = Mathf.Clamp(maxPlayers, 0, playerSlots.Length);
-        List<PlayerState> slotPlayers = BuildSlotPlayers(currentRoom, localPlayer, safeMaxPlayers);
+        List<PlayerState> slotPlayers = GetOrderedPlayersForSlots(currentRoom, safeMaxPlayers);
         int occupiedSlotCount = Mathf.Clamp(slotPlayers.Count, 0, safeMaxPlayers);
 
         for (int i = 0; i < playerSlots.Length; i++)
@@ -260,36 +670,33 @@ public class CurrentRoomScreenBinder : MonoBehaviour
                 continue;
             }
 
-            if (i == 0)
-            {
-                ClearLocalPlayerIdentity();
-            }
-
             if (i < occupiedSlotCount)
             {
                 PlayerState slotPlayer = slotPlayers[i];
                 bool isLocalSlot = localPlayer != null && AreSamePlayer(slotPlayer, localPlayer);
-                if (i == 0 && isLocalSlot)
+                if (isLocalSlot)
                 {
-                    ApplyLocalPlayerSlotVisual(slot, slotPlayer);
+                    ApplyLocalPlayerSlotVisual(i, slot, slotPlayer);
                 }
                 else
                 {
-                    ApplyOtherPlayerSlotVisual(slot, slotPlayer != null && slotPlayer.isReady);
+                    ApplyOtherPlayerSlotVisual(i, slot, slotPlayer);
                 }
             }
             else if (i < safeMaxPlayers)
             {
                 ApplySlotVisualState(slot, SlotVisualState.Available);
+                ClearSlotIdentity(i);
             }
             else
             {
                 ApplySlotVisualState(slot, SlotVisualState.Locked);
+                ClearSlotIdentity(i);
             }
         }
     }
 
-    private static List<PlayerState> BuildSlotPlayers(RoomState currentRoom, PlayerState localPlayer, int maxSlots)
+    private static List<PlayerState> GetOrderedPlayersForSlots(RoomState currentRoom, int maxSlots)
     {
         List<PlayerState> slotPlayers = new List<PlayerState>();
         if (currentRoom == null || currentRoom.players == null || maxSlots <= 0)
@@ -297,9 +704,10 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             return slotPlayers;
         }
 
-        if (localPlayer != null)
+        PlayerState hostPlayer = FindHostPlayer(currentRoom.players);
+        if (hostPlayer != null)
         {
-            slotPlayers.Add(localPlayer);
+            slotPlayers.Add(hostPlayer);
         }
 
         for (int i = 0; i < currentRoom.players.Count; i++)
@@ -310,7 +718,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
                 continue;
             }
 
-            if (localPlayer != null && AreSamePlayer(candidate, localPlayer))
+            if (hostPlayer != null && AreSamePlayer(candidate, hostPlayer))
             {
                 continue;
             }
@@ -323,6 +731,33 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         }
 
         return slotPlayers;
+    }
+
+    private static PlayerState FindHostPlayer(List<PlayerState> players)
+    {
+        if (players == null || players.Count == 0)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < players.Count; i++)
+        {
+            PlayerState player = players[i];
+            if (player != null && player.isHost)
+            {
+                return player;
+            }
+        }
+
+        for (int i = 0; i < players.Count; i++)
+        {
+            if (players[i] != null)
+            {
+                return players[i];
+            }
+        }
+
+        return null;
     }
 
     private static bool AreSamePlayer(PlayerState first, PlayerState second)
@@ -340,7 +775,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         return ReferenceEquals(first, second);
     }
 
-    private void ApplyLocalPlayerSlotVisual(GameObject slot, PlayerState localPlayer)
+    private void ApplyLocalPlayerSlotVisual(int slotIndex, GameObject slot, PlayerState localPlayer)
     {
         if (slot == null)
         {
@@ -352,18 +787,9 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         Image slotBackground = slot.GetComponent<Image>();
         Transform avatarTransform = slot.transform.Find("AvatarPlaceholder");
         Image avatarImage = avatarTransform != null ? avatarTransform.GetComponent<Image>() : null;
-        Transform statusTransform = slot.transform.Find("StatusButton");
-        Button statusButton = statusTransform != null ? statusTransform.GetComponent<Button>() : null;
-        Image statusButtonImage = statusTransform != null ? statusTransform.GetComponent<Image>() : null;
-        TMP_Text statusText = null;
-        if (statusTransform != null)
-        {
-            Transform labelTransform = statusTransform.Find("Label");
-            if (labelTransform != null)
-            {
-                statusText = labelTransform.GetComponent<TMP_Text>();
-            }
-        }
+        Button statusButton = GetSlotStatusButton(slotIndex);
+        Image statusButtonImage = GetSlotStatusButtonImage(slotIndex);
+        TMP_Text statusText = GetSlotStatusText(slotIndex);
 
         SetGraphicAlpha(slotBackground, 1f);
         SetGraphicAlpha(avatarImage, 1f);
@@ -388,31 +814,24 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             statusButton.interactable = true;
         }
 
-        ApplyLocalPlayerIdentity(localPlayer);
+        ApplySlotIdentity(slotIndex, localPlayer, true);
     }
 
-    private void ApplyOtherPlayerSlotVisual(GameObject slot, bool isReady)
+    private void ApplyOtherPlayerSlotVisual(int slotIndex, GameObject slot, PlayerState slotPlayer)
     {
         if (slot == null)
         {
             return;
         }
 
+        bool isReady = slotPlayer != null && slotPlayer.isReady;
+
         Image slotBackground = slot.GetComponent<Image>();
         Transform avatarTransform = slot.transform.Find("AvatarPlaceholder");
         Image avatarImage = avatarTransform != null ? avatarTransform.GetComponent<Image>() : null;
-        Transform statusTransform = slot.transform.Find("StatusButton");
-        Button statusButton = statusTransform != null ? statusTransform.GetComponent<Button>() : null;
-        Image statusButtonImage = statusTransform != null ? statusTransform.GetComponent<Image>() : null;
-        TMP_Text statusText = null;
-        if (statusTransform != null)
-        {
-            Transform labelTransform = statusTransform.Find("Label");
-            if (labelTransform != null)
-            {
-                statusText = labelTransform.GetComponent<TMP_Text>();
-            }
-        }
+        Button statusButton = GetSlotStatusButton(slotIndex);
+        Image statusButtonImage = GetSlotStatusButtonImage(slotIndex);
+        TMP_Text statusText = GetSlotStatusText(slotIndex);
 
         SetGraphicAlpha(slotBackground, 1f);
         SetGraphicAlpha(avatarImage, 1f);
@@ -436,6 +855,8 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         {
             statusButton.interactable = false;
         }
+
+        ApplySlotIdentity(slotIndex, slotPlayer, false);
     }
 
     private void ApplySlotVisualState(GameObject slot, SlotVisualState state)
@@ -571,11 +992,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
 
     private void BindUiEvents()
     {
-        if (playerSlot01StatusButton != null)
-        {
-            playerSlot01StatusButton.onClick.RemoveListener(OnPlayerSlot01StatusClicked);
-            playerSlot01StatusButton.onClick.AddListener(OnPlayerSlot01StatusClicked);
-        }
+        BindSlotStatusButtonEvents();
 
         if (copyRoomIdButton != null)
         {
@@ -586,10 +1003,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
 
     private void UnbindUiEvents()
     {
-        if (playerSlot01StatusButton != null)
-        {
-            playerSlot01StatusButton.onClick.RemoveListener(OnPlayerSlot01StatusClicked);
-        }
+        UnbindSlotStatusButtonEvents();
 
         if (copyRoomIdButton != null)
         {
@@ -599,6 +1013,16 @@ public class CurrentRoomScreenBinder : MonoBehaviour
 
     private void OnPlayerSlot01StatusClicked()
     {
+        OnPlayerSlotStatusClicked(0);
+    }
+
+    private async void OnPlayerSlotStatusClicked(int slotIndex)
+    {
+        if (slotIndex < 0 || isReadySyncInProgress)
+        {
+            return;
+        }
+
         RoomState currentRoom = SharedStore.CurrentRoom;
         string localPlayerId = SharedStore.LocalPlayer != null ? SharedStore.LocalPlayer.playerId : string.Empty;
         PlayerState localPlayer = FindLocalPlayer(currentRoom, localPlayerId);
@@ -607,8 +1031,62 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             return;
         }
 
-        localPlayer.isReady = !localPlayer.isReady;
+        int safeMaxPlayers = Mathf.Clamp(
+            currentRoom.maxPlayers,
+            1,
+            Mathf.Max(1, playerSlots != null ? playerSlots.Length : DefaultSlotCount));
+        List<PlayerState> slotPlayers = GetOrderedPlayersForSlots(currentRoom, safeMaxPlayers);
+        if (slotIndex >= slotPlayers.Count)
+        {
+            return;
+        }
+
+        PlayerState slotPlayer = slotPlayers[slotIndex];
+        if (slotPlayer == null || !AreSamePlayer(slotPlayer, localPlayer))
+        {
+            return;
+        }
+
+        bool previousReadyState = localPlayer.isReady;
+        bool nextReadyState = !previousReadyState;
+        localPlayer.isReady = nextReadyState;
         ApplyCurrentRoomToUi();
+
+        string lobbyId = currentRoom.roomId != null ? currentRoom.roomId.Trim() : string.Empty;
+        if (!IsAuthReadyForLobbySync() || string.IsNullOrWhiteSpace(lobbyId))
+        {
+            return;
+        }
+
+        if (lobbyService == null)
+        {
+            lobbyService = new UnityLobbyService();
+        }
+
+        bool updateSucceeded = false;
+        isReadySyncInProgress = true;
+        try
+        {
+            string safeDisplayName = ResolveSlotDisplayName(localPlayer, true);
+            updateSucceeded = await lobbyService.UpdatePlayerReadyAsync(
+                lobbyId,
+                nextReadyState,
+                localPlayer.playerId,
+                safeDisplayName);
+        }
+        finally
+        {
+            isReadySyncInProgress = false;
+        }
+
+        if (!updateSucceeded)
+        {
+            localPlayer.isReady = previousReadyState;
+            ApplyCurrentRoomToUi();
+            return;
+        }
+
+        TryRefreshCurrentLobbyAsync();
     }
 
     private void OnCopyRoomIdButtonClicked()
@@ -809,6 +1287,31 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             sideMapPreview = FindImageByName(allTransforms, "SideMapPreview");
         }
 
+        if (screenSwitcher == null)
+        {
+            screenSwitcher = FindObjectOfType<LobbyMockScreenSwitcher>(true);
+        }
+
+        if (roomBrowserScreen == null)
+        {
+            roomBrowserScreen = FindGameObjectByName(allTransforms, "RoomBrowserScreen");
+        }
+
+        if (createRoomScreen == null)
+        {
+            createRoomScreen = FindGameObjectByName(allTransforms, "CreateRoomScreen");
+        }
+
+        if (currentRoomScreen == null)
+        {
+            currentRoomScreen = FindGameObjectByName(allTransforms, "CurrentRoomScreen");
+        }
+
+        if (roomBrowserScreenBinder == null && roomBrowserScreen != null)
+        {
+            roomBrowserScreenBinder = roomBrowserScreen.GetComponentInChildren<RoomBrowserScreenBinder>(true);
+        }
+
         AssignSlotByName(allTransforms, "PlayerSlot01", 0);
         AssignSlotByName(allTransforms, "PlayerSlot02", 1);
         AssignSlotByName(allTransforms, "PlayerSlot03", 2);
@@ -837,8 +1340,61 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             }
         }
 
+        EnsureSlotIdentityTexts(allowCreateGeneratedUi);
         EnsurePlayerSlot01IdentityTexts(allowCreateGeneratedUi);
         EnsureHostStatusSprites();
+    }
+
+    private void BindSlotStatusButtonEvents()
+    {
+        if (slotStatusButtonHandlers == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < DefaultSlotCount; i++)
+        {
+            Button slotStatusButton = GetSlotStatusButton(i);
+            if (slotStatusButton == null)
+            {
+                continue;
+            }
+
+            if (slotStatusButtonHandlers[i] != null)
+            {
+                slotStatusButton.onClick.RemoveListener(slotStatusButtonHandlers[i]);
+            }
+
+            int capturedIndex = i;
+            UnityAction handler = () => OnPlayerSlotStatusClicked(capturedIndex);
+            slotStatusButtonHandlers[i] = handler;
+            slotStatusButton.onClick.AddListener(handler);
+        }
+    }
+
+    private void UnbindSlotStatusButtonEvents()
+    {
+        if (slotStatusButtonHandlers == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < DefaultSlotCount; i++)
+        {
+            UnityAction handler = slotStatusButtonHandlers[i];
+            if (handler == null)
+            {
+                continue;
+            }
+
+            Button slotStatusButton = GetSlotStatusButton(i);
+            if (slotStatusButton != null)
+            {
+                slotStatusButton.onClick.RemoveListener(handler);
+            }
+
+            slotStatusButtonHandlers[i] = null;
+        }
     }
 
     private void EnsurePlayerSlot01IdentityTexts(bool allowCreateGeneratedUi = true)
@@ -1001,6 +1557,81 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         }
     }
 
+    private void ApplySlotIdentity(int slotIndex, PlayerState slotPlayer, bool isLocalSlot)
+    {
+        TMP_Text slotNameText = GetSlotNameText(slotIndex);
+        TMP_Text slotHostBadgeText = GetSlotHostBadgeText(slotIndex);
+
+        if (slotNameText == null && slotHostBadgeText == null)
+        {
+            return;
+        }
+
+        if (slotPlayer == null)
+        {
+            ClearSlotIdentity(slotIndex);
+            return;
+        }
+
+        string displayName = ResolveSlotDisplayName(slotPlayer, isLocalSlot);
+        if (slotNameText != null)
+        {
+            slotNameText.text = displayName;
+            slotNameText.gameObject.SetActive(true);
+        }
+
+        if (slotHostBadgeText != null)
+        {
+            bool isHost = slotPlayer.isHost;
+            slotHostBadgeText.text = isHost ? localPlayerHostBadgeLabel : string.Empty;
+            slotHostBadgeText.gameObject.SetActive(isHost);
+        }
+    }
+
+    private void ClearSlotIdentity(int slotIndex)
+    {
+        TMP_Text slotNameText = GetSlotNameText(slotIndex, false);
+        TMP_Text slotHostBadgeText = GetSlotHostBadgeText(slotIndex, false);
+
+        if (slotNameText != null)
+        {
+            slotNameText.text = string.Empty;
+            slotNameText.gameObject.SetActive(false);
+        }
+
+        if (slotHostBadgeText != null)
+        {
+            slotHostBadgeText.text = string.Empty;
+            slotHostBadgeText.gameObject.SetActive(false);
+        }
+    }
+
+    private string ResolveSlotDisplayName(PlayerState slotPlayer, bool isLocalSlot)
+    {
+        if (slotPlayer != null)
+        {
+            string playerName = slotPlayer.displayName != null ? slotPlayer.displayName.Trim() : string.Empty;
+            if (!string.IsNullOrWhiteSpace(playerName))
+            {
+                return playerName;
+            }
+        }
+
+        if (isLocalSlot && SharedStore.LocalPlayer != null)
+        {
+            string localProfileName = SharedStore.LocalPlayer.displayName != null
+                ? SharedStore.LocalPlayer.displayName.Trim()
+                : string.Empty;
+            if (!string.IsNullOrWhiteSpace(localProfileName))
+            {
+                return localProfileName;
+            }
+        }
+
+        string configuredFallback = localPlayerFallbackName != null ? localPlayerFallbackName.Trim() : string.Empty;
+        return string.IsNullOrWhiteSpace(configuredFallback) ? "Player" : configuredFallback;
+    }
+
     private void EnsureHostStatusSprites()
     {
         if (hostReadyButtonSprite == null && playerSlot01StatusButtonImage != null)
@@ -1038,13 +1669,161 @@ public class CurrentRoomScreenBinder : MonoBehaviour
 
     private Image GetSlotStatusButtonImage(int slotIndex)
     {
+        Button slotStatusButton = GetSlotStatusButton(slotIndex);
+        if (slotStatusButton == null)
+        {
+            return null;
+        }
+
+        return slotStatusButton.GetComponent<Image>();
+    }
+
+    private Button GetSlotStatusButton(int slotIndex)
+    {
         if (playerSlots == null || slotIndex < 0 || slotIndex >= playerSlots.Length || playerSlots[slotIndex] == null)
         {
             return null;
         }
 
         Transform statusTransform = playerSlots[slotIndex].transform.Find("StatusButton");
-        return statusTransform != null ? statusTransform.GetComponent<Image>() : null;
+        return statusTransform != null ? statusTransform.GetComponent<Button>() : null;
+    }
+
+    private TMP_Text GetSlotStatusText(int slotIndex)
+    {
+        Button slotStatusButton = GetSlotStatusButton(slotIndex);
+        if (slotStatusButton == null)
+        {
+            return null;
+        }
+
+        Transform labelTransform = slotStatusButton.transform.Find("Label");
+        return labelTransform != null ? labelTransform.GetComponent<TMP_Text>() : null;
+    }
+
+    private void EnsureSlotIdentityTexts(bool allowCreateGeneratedUi = true)
+    {
+        if (playerSlots == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < playerSlots.Length; i++)
+        {
+            GetSlotNameText(i, allowCreateGeneratedUi);
+            GetSlotHostBadgeText(i, allowCreateGeneratedUi);
+        }
+    }
+
+    private TMP_Text GetSlotNameText(int slotIndex, bool allowCreateGeneratedUi = true)
+    {
+        if (slotIndex == 0)
+        {
+            EnsurePlayerSlot01IdentityTexts(allowCreateGeneratedUi);
+            return playerSlot01NameText;
+        }
+
+        Transform slotRoot = GetSlotRoot(slotIndex);
+        if (slotRoot == null)
+        {
+            return null;
+        }
+
+        Transform existingName = slotRoot.Find("PlayerNameText");
+        TMP_Text slotNameText = existingName != null ? existingName.GetComponent<TMP_Text>() : null;
+
+        if (slotNameText == null && allowCreateGeneratedUi)
+        {
+            slotNameText = CreateSlotIdentityText(slotRoot, "PlayerNameText", new Vector2(14f, -12f), new Vector2(200f, 24f), 16f);
+        }
+
+        TMP_Text slotHostBadgeText = GetSlotHostBadgeText(slotIndex, allowCreateGeneratedUi);
+        ApplySlotIdentityTextStyle(slotNameText, slotHostBadgeText, slotIndex);
+        return slotNameText;
+    }
+
+    private TMP_Text GetSlotHostBadgeText(int slotIndex, bool allowCreateGeneratedUi = true)
+    {
+        if (slotIndex == 0)
+        {
+            EnsurePlayerSlot01IdentityTexts(allowCreateGeneratedUi);
+            return playerSlot01HostBadgeText;
+        }
+
+        Transform slotRoot = GetSlotRoot(slotIndex);
+        if (slotRoot == null)
+        {
+            return null;
+        }
+
+        Transform existingHostBadge = slotRoot.Find("HostBadgeText");
+        TMP_Text slotHostBadgeText = existingHostBadge != null ? existingHostBadge.GetComponent<TMP_Text>() : null;
+
+        if (slotHostBadgeText == null && allowCreateGeneratedUi)
+        {
+            slotHostBadgeText = CreateSlotIdentityText(slotRoot, "HostBadgeText", new Vector2(14f, -32f), new Vector2(120f, 20f), 14f);
+        }
+
+        TMP_Text slotNameText = null;
+        Transform existingName = slotRoot.Find("PlayerNameText");
+        if (existingName != null)
+        {
+            slotNameText = existingName.GetComponent<TMP_Text>();
+        }
+
+        ApplySlotIdentityTextStyle(slotNameText, slotHostBadgeText, slotIndex);
+        return slotHostBadgeText;
+    }
+
+    private void ApplySlotIdentityTextStyle(TMP_Text slotNameText, TMP_Text slotHostBadgeText, int slotIndex)
+    {
+        if (slotNameText != null)
+        {
+            slotNameText.color = localPlayerNameColor;
+            slotNameText.fontStyle = FontStyles.Bold;
+            slotNameText.alignment = TextAlignmentOptions.MidlineLeft;
+            slotNameText.overflowMode = TextOverflowModes.Ellipsis;
+            slotNameText.enableWordWrapping = false;
+            slotNameText.raycastTarget = false;
+        }
+
+        if (slotHostBadgeText != null)
+        {
+            slotHostBadgeText.color = localPlayerHostBadgeColor;
+            slotHostBadgeText.fontStyle = FontStyles.Bold;
+            slotHostBadgeText.alignment = TextAlignmentOptions.MidlineLeft;
+            slotHostBadgeText.overflowMode = TextOverflowModes.Ellipsis;
+            slotHostBadgeText.enableWordWrapping = false;
+            slotHostBadgeText.raycastTarget = false;
+        }
+
+        TMP_Text statusText = GetSlotStatusText(slotIndex);
+        TMP_FontAsset fallbackFont = statusText != null ? statusText.font : null;
+        if (fallbackFont == null)
+        {
+            return;
+        }
+
+        if (slotNameText != null && slotNameText.font == null)
+        {
+            slotNameText.font = fallbackFont;
+        }
+
+        if (slotHostBadgeText != null && slotHostBadgeText.font == null)
+        {
+            slotHostBadgeText.font = fallbackFont;
+        }
+    }
+
+    private Transform GetSlotRoot(int slotIndex)
+    {
+        if (playerSlots == null || slotIndex < 0 || slotIndex >= playerSlots.Length)
+        {
+            return null;
+        }
+
+        GameObject slot = playerSlots[slotIndex];
+        return slot != null ? slot.transform : null;
     }
 
     private void AssignSlotByName(Transform[] allTransforms, string slotName, int index)
