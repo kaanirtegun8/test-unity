@@ -4908,6 +4908,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   countdownText: {fileID: 910100033}
   countdownStartSeconds: 30
+  playersHintText: {fileID: 0}
+  playersHintMessage: "H\u0131zl\u0131 ge\xE7i\u015F i\xE7in herkes confirm etmeli."
   playerNameTexts:
   - {fileID: 910103113}
   - {fileID: 910103213}
@@ -4923,16 +4925,19 @@ MonoBehaviour:
   - {fileID: 0}
   - {fileID: 0}
   - {fileID: 0}
+  lockInButtonSprite: {fileID: 0}
   emptySlotNameText: 
   emptySlotStateText: Empty
   lockedSlotNameText: 
   lockedSlotStateText: Locked
   waitingText: Waiting
-  confirmedText: Confirmed
-  confirmActionText: Confirm
+  confirmedText: Locked In
+  confirmActionText: Lock In
   waitingTextColor: {r: 0.78, g: 0.87, b: 0.95, a: 0.95}
   confirmedTextColor: {r: 0.62, g: 0.9, b: 0.67, a: 1}
   confirmActionColor: {r: 0.9, g: 0.95, b: 1, a: 1}
+  lockInButtonTintColor: {r: 1, g: 1, b: 1, a: 1}
+  lobbyRefreshIntervalSeconds: 1.5
 --- !u!1 &910100011
 GameObject:
   m_ObjectHideFlags: 0

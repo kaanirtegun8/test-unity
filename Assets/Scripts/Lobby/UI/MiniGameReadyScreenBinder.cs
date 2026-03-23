@@ -4,10 +4,17 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
+using System.Collections;
+using Unity.Services.Lobbies.Models;
 
 public class MiniGameReadyScreenBinder : MonoBehaviour
 {
     private const int SlotCount = 4;
+    private const string LegacyConfirmedText = "Confirmed";
+    private const string LegacyConfirmActionText = "Confirm";
+    private const string DefaultWaitingText = "Waiting";
+    private const string DefaultLockedInText = "Locked In";
+    private const string DefaultLockInActionText = "Lock In";
 
     private enum MatchStartReadinessState
     {
@@ -21,47 +28,67 @@ public class MiniGameReadyScreenBinder : MonoBehaviour
 
     [SerializeField] private TMP_Text countdownText;
     [SerializeField] private int countdownStartSeconds = 30;
+    [SerializeField] private TMP_Text playersHintText;
+    [SerializeField] private string playersHintMessage = "Hızlı geçiş için herkes confirm etmeli.";
     [SerializeField] private TMP_Text[] playerNameTexts = new TMP_Text[SlotCount];
     [SerializeField] private TMP_Text[] playerStateTexts = new TMP_Text[SlotCount];
     [SerializeField] private Button[] playerConfirmButtons = new Button[SlotCount];
+    [SerializeField] private Sprite lockInButtonSprite;
     [SerializeField] private string emptySlotNameText = "";
     [SerializeField] private string emptySlotStateText = "Empty";
     [SerializeField] private string lockedSlotNameText = "";
     [SerializeField] private string lockedSlotStateText = "Locked";
-    [SerializeField] private string waitingText = "Waiting";
-    [SerializeField] private string confirmedText = "Confirmed";
-    [SerializeField] private string confirmActionText = "Confirm";
+    [SerializeField] private string waitingText = DefaultWaitingText;
+    [SerializeField] private string confirmedText = DefaultLockedInText;
+    [SerializeField] private string confirmActionText = DefaultLockInActionText;
     [SerializeField] private Color waitingTextColor = new Color(0.78f, 0.87f, 0.95f, 0.95f);
     [SerializeField] private Color confirmedTextColor = new Color(0.62f, 0.9f, 0.67f, 1f);
     [SerializeField] private Color confirmActionColor = new Color(0.9f, 0.95f, 1f, 1f);
+    [SerializeField] private Color lockInButtonTintColor = Color.white;
+    [SerializeField] private float lobbyRefreshIntervalSeconds = 1.5f;
 
     private readonly UnityAction[] slotConfirmHandlers = new UnityAction[SlotCount];
     private Coroutine countdownCoroutine;
     private bool isCountdownCompleted;
     private int remainingSeconds;
     private MatchStartReadinessState matchStartReadinessState = MatchStartReadinessState.None;
+    private Sprite resolvedLockInButtonSprite;
+    private bool hasResolvedLockInButtonSprite;
+    private Coroutine lobbyRefreshCoroutine;
+    private bool isLobbyRefreshInProgress;
+    private bool isLockInUpdateInProgress;
+    private UnityLobbyService lobbyService;
 
     private LobbyStateStore SharedStore => LobbyStateStore.Local;
 
     private void OnEnable()
     {
+        if (lobbyService == null)
+        {
+            lobbyService = new UnityLobbyService();
+        }
+
         AutoAssignReferences();
+        NormalizeStatusTexts();
+        ApplyPlayersHintText();
         BindConfirmButtons();
-        ResetPlayersToWaiting();
         ResetMatchStartReadinessState();
         RefreshFromCurrentRoom();
         StartCountdown();
+        StartLobbyRefreshLoop();
     }
 
     private void OnDisable()
     {
         StopCountdown();
+        StopLobbyRefreshLoop();
         UnbindConfirmButtons();
     }
 
     private void OnDestroy()
     {
         StopCountdown();
+        StopLobbyRefreshLoop();
         UnbindConfirmButtons();
     }
 
@@ -69,8 +96,51 @@ public class MiniGameReadyScreenBinder : MonoBehaviour
     private void OnValidate()
     {
         AutoAssignReferences(false);
+        NormalizeStatusTexts();
     }
 #endif
+
+    private void NormalizeStatusTexts()
+    {
+        waitingText = string.IsNullOrWhiteSpace(waitingText)
+            ? DefaultWaitingText
+            : waitingText.Trim();
+
+        if (string.IsNullOrWhiteSpace(confirmedText) ||
+            string.Equals(confirmedText.Trim(), LegacyConfirmedText, StringComparison.OrdinalIgnoreCase))
+        {
+            confirmedText = DefaultLockedInText;
+        }
+        else
+        {
+            confirmedText = confirmedText.Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(confirmActionText) ||
+            string.Equals(confirmActionText.Trim(), LegacyConfirmActionText, StringComparison.OrdinalIgnoreCase))
+        {
+            confirmActionText = DefaultLockInActionText;
+        }
+        else
+        {
+            confirmActionText = confirmActionText.Trim();
+        }
+    }
+
+    private void ApplyPlayersHintText()
+    {
+        TMP_Text hintLabel = EnsurePlayersHintText();
+        if (hintLabel == null)
+        {
+            return;
+        }
+
+        string safeHint = string.IsNullOrWhiteSpace(playersHintMessage)
+            ? "Hızlı geçiş için herkes confirm etmeli."
+            : playersHintMessage.Trim();
+        hintLabel.text = safeHint;
+        hintLabel.gameObject.SetActive(true);
+    }
 
     public void RefreshFromCurrentRoom()
     {
@@ -162,7 +232,7 @@ public class MiniGameReadyScreenBinder : MonoBehaviour
         bool isConfirmed = player != null && player.isConfirmed;
         string stateText = waitingText;
         Color stateColor = waitingTextColor;
-        bool confirmInteractable = false;
+        bool showConfirmActionButton = false;
 
         if (isConfirmed)
         {
@@ -171,13 +241,12 @@ public class MiniGameReadyScreenBinder : MonoBehaviour
         }
         else if (isLocalPlayer)
         {
-            stateText = confirmActionText;
-            stateColor = confirmActionColor;
-            confirmInteractable = true;
+            showConfirmActionButton = true;
         }
 
         ApplyPassiveSlot(slotIndex, displayName, stateText, stateColor, true);
-        SetConfirmButtonState(slotIndex, confirmInteractable);
+        SetStateTextVisibility(slotIndex, !showConfirmActionButton);
+        SetConfirmButtonState(slotIndex, showConfirmActionButton);
     }
 
     private void ApplyPassiveSlot(int slotIndex, string nameText, string stateText, Color stateColor, bool occupied)
@@ -195,9 +264,20 @@ public class MiniGameReadyScreenBinder : MonoBehaviour
         {
             stateLabel.text = stateText ?? string.Empty;
             stateLabel.color = stateColor;
+            stateLabel.gameObject.SetActive(true);
         }
 
+        SetStateTextVisibility(slotIndex, true);
         SetConfirmButtonState(slotIndex, false);
+    }
+
+    private void SetStateTextVisibility(int slotIndex, bool visible)
+    {
+        TMP_Text stateLabel = GetPlayerStateText(slotIndex);
+        if (stateLabel != null)
+        {
+            stateLabel.gameObject.SetActive(visible);
+        }
     }
 
     private static List<PlayerState> GetOrderedPlayers(RoomState room, int maxPlayers)
@@ -298,8 +378,29 @@ public class MiniGameReadyScreenBinder : MonoBehaviour
 
     private void OnConfirmButtonClicked(int slotIndex)
     {
+        TryLockInAsync(slotIndex);
+    }
+
+    private async void TryLockInAsync(int slotIndex)
+    {
+        if (isLockInUpdateInProgress)
+        {
+            return;
+        }
+
         RoomState room = SharedStore.CurrentRoom;
-        if (room == null || room.players == null || slotIndex < 0)
+        if (room == null || room.players == null || slotIndex < 0 || lobbyService == null)
+        {
+            return;
+        }
+
+        if (!IsAuthReadyForLobbySync())
+        {
+            return;
+        }
+
+        string lobbyId = room.roomId != null ? room.roomId.Trim() : string.Empty;
+        if (string.IsNullOrWhiteSpace(lobbyId))
         {
             return;
         }
@@ -325,8 +426,32 @@ public class MiniGameReadyScreenBinder : MonoBehaviour
             return;
         }
 
+        string localDisplayName = SharedStore.LocalPlayer != null ? SharedStore.LocalPlayer.displayName : string.Empty;
+
+        isLockInUpdateInProgress = true;
+        bool updateSucceeded = false;
+        try
+        {
+            updateSucceeded = await lobbyService.UpdatePlayerLockInAsync(
+                lobbyId,
+                true,
+                localPlayerId,
+                localDisplayName);
+        }
+        finally
+        {
+            isLockInUpdateInProgress = false;
+        }
+
+        if (!updateSucceeded)
+        {
+            return;
+        }
+
         targetPlayer.isConfirmed = true;
+        SharedStore.ApplyMappedCurrentRoom(room, true);
         RefreshFromCurrentRoom();
+        TryRefreshLobbyStateAsync();
     }
 
     private TMP_Text GetPlayerNameText(int slotIndex)
@@ -408,27 +533,72 @@ public class MiniGameReadyScreenBinder : MonoBehaviour
             return null;
         }
 
-        stateLabel.raycastTarget = true;
-
-        Button createdButton = stateLabel.GetComponent<Button>();
-        if (createdButton == null)
+        RectTransform stateRect = stateLabel.rectTransform;
+        RectTransform parentRect = stateRect.parent as RectTransform;
+        if (parentRect == null)
         {
-            createdButton = stateLabel.gameObject.AddComponent<Button>();
+            return null;
         }
 
-        if (createdButton.targetGraphic == null)
-        {
-            createdButton.targetGraphic = stateLabel;
-        }
+        GameObject buttonObject = new GameObject($"LockInButton0{slotIndex + 1}", typeof(RectTransform), typeof(Image), typeof(Button));
+        RectTransform buttonRect = buttonObject.GetComponent<RectTransform>();
+        buttonRect.SetParent(parentRect, false);
+        buttonRect.anchorMin = stateRect.anchorMin;
+        buttonRect.anchorMax = stateRect.anchorMax;
+        buttonRect.anchoredPosition = stateRect.anchoredPosition;
+        buttonRect.sizeDelta = stateRect.sizeDelta;
+        buttonRect.pivot = stateRect.pivot;
 
+        Image buttonImage = buttonObject.GetComponent<Image>();
+        Sprite resolvedSprite = ResolveLockInButtonSprite();
+        if (resolvedSprite != null)
+        {
+            buttonImage.sprite = resolvedSprite;
+            buttonImage.type = Image.Type.Sliced;
+            buttonImage.preserveAspect = true;
+        }
+        buttonImage.color = lockInButtonTintColor;
+        buttonImage.raycastTarget = true;
+
+        Button createdButton = buttonObject.GetComponent<Button>();
+        createdButton.targetGraphic = buttonImage;
         ColorBlock colors = createdButton.colors;
         colors.normalColor = Color.white;
-        colors.highlightedColor = Color.white;
-        colors.pressedColor = new Color(0.9f, 0.9f, 0.9f, 1f);
+        colors.highlightedColor = new Color(0.95f, 0.95f, 0.95f, 1f);
+        colors.pressedColor = new Color(0.84f, 0.84f, 0.84f, 1f);
         colors.selectedColor = Color.white;
-        colors.disabledColor = Color.white;
+        colors.disabledColor = new Color(1f, 1f, 1f, 0.6f);
         createdButton.colors = colors;
         createdButton.transition = Selectable.Transition.ColorTint;
+        createdButton.interactable = false;
+        buttonObject.SetActive(false);
+
+        GameObject labelObject = new GameObject($"LockInButtonText0{slotIndex + 1}", typeof(RectTransform), typeof(TextMeshProUGUI));
+        RectTransform labelRect = labelObject.GetComponent<RectTransform>();
+        labelRect.SetParent(buttonRect, false);
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.anchoredPosition = Vector2.zero;
+        labelRect.sizeDelta = new Vector2(-14f, -6f);
+
+        TMP_Text buttonLabel = labelObject.GetComponent<TMP_Text>();
+        buttonLabel.text = confirmActionText;
+        buttonLabel.fontSize = stateLabel.fontSize;
+        buttonLabel.fontStyle = stateLabel.fontStyle;
+        buttonLabel.alignment = TextAlignmentOptions.Center;
+        buttonLabel.color = confirmActionColor;
+        buttonLabel.raycastTarget = false;
+        buttonLabel.enableAutoSizing = false;
+        if (stateLabel.font != null)
+        {
+            buttonLabel.font = stateLabel.font;
+        }
+        if (stateLabel.fontSharedMaterial != null)
+        {
+            buttonLabel.fontSharedMaterial = stateLabel.fontSharedMaterial;
+        }
+
+        stateLabel.raycastTarget = false;
 
         playerConfirmButtons[slotIndex] = createdButton;
         return createdButton;
@@ -436,11 +606,88 @@ public class MiniGameReadyScreenBinder : MonoBehaviour
 
     private void SetConfirmButtonState(int slotIndex, bool interactable)
     {
+        TMP_Text stateLabel = GetPlayerStateText(slotIndex);
         Button button = EnsurePlayerConfirmButton(slotIndex);
+        if (stateLabel != null)
+        {
+            stateLabel.raycastTarget = false;
+        }
+
         if (button != null)
         {
+            TMP_Text buttonLabel = button.GetComponentInChildren<TMP_Text>(true);
+            if (buttonLabel != null)
+            {
+                buttonLabel.text = confirmActionText;
+                buttonLabel.color = confirmActionColor;
+            }
+
+            button.gameObject.SetActive(interactable);
             button.interactable = interactable;
         }
+    }
+
+    private Sprite ResolveLockInButtonSprite()
+    {
+        if (lockInButtonSprite != null)
+        {
+            return lockInButtonSprite;
+        }
+
+        if (hasResolvedLockInButtonSprite)
+        {
+            return resolvedLockInButtonSprite;
+        }
+
+        hasResolvedLockInButtonSprite = true;
+        Image[] allImages = transform.root != null
+            ? transform.root.GetComponentsInChildren<Image>(true)
+            : Array.Empty<Image>();
+
+        string[] preferredButtonNames =
+        {
+            "StartGameButton",
+            "CreateButton",
+            "CreateRoomButton",
+            "JoinButton",
+            "BackButton"
+        };
+
+        for (int nameIndex = 0; nameIndex < preferredButtonNames.Length; nameIndex++)
+        {
+            string preferredName = preferredButtonNames[nameIndex];
+            for (int i = 0; i < allImages.Length; i++)
+            {
+                Image image = allImages[i];
+                if (image == null || image.sprite == null || image.gameObject == null)
+                {
+                    continue;
+                }
+
+                if (string.Equals(image.gameObject.name, preferredName, StringComparison.Ordinal))
+                {
+                    resolvedLockInButtonSprite = image.sprite;
+                    return resolvedLockInButtonSprite;
+                }
+            }
+        }
+
+        for (int i = 0; i < allImages.Length; i++)
+        {
+            Image image = allImages[i];
+            if (image == null || image.sprite == null || image.gameObject == null)
+            {
+                continue;
+            }
+
+            if (image.gameObject.name.IndexOf("Button", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                resolvedLockInButtonSprite = image.sprite;
+                return resolvedLockInButtonSprite;
+            }
+        }
+
+        return null;
     }
 
     private void ResetPlayersToWaiting()
@@ -539,11 +786,158 @@ public class MiniGameReadyScreenBinder : MonoBehaviour
                string.Equals(playerId, localPlayerId, StringComparison.Ordinal);
     }
 
+    private void StartLobbyRefreshLoop()
+    {
+        StopLobbyRefreshLoop();
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        TryRefreshLobbyStateAsync();
+        lobbyRefreshCoroutine = StartCoroutine(LobbyRefreshCoroutine());
+    }
+
+    private void StopLobbyRefreshLoop()
+    {
+        if (lobbyRefreshCoroutine != null)
+        {
+            StopCoroutine(lobbyRefreshCoroutine);
+            lobbyRefreshCoroutine = null;
+        }
+
+        isLobbyRefreshInProgress = false;
+    }
+
+    private IEnumerator LobbyRefreshCoroutine()
+    {
+        float safeInterval = Mathf.Max(1f, lobbyRefreshIntervalSeconds);
+        WaitForSeconds wait = new WaitForSeconds(safeInterval);
+
+        while (isActiveAndEnabled && gameObject.activeInHierarchy)
+        {
+            yield return wait;
+            TryRefreshLobbyStateAsync();
+        }
+
+        lobbyRefreshCoroutine = null;
+    }
+
+    private async void TryRefreshLobbyStateAsync()
+    {
+        if (isLobbyRefreshInProgress || lobbyService == null || !IsAuthReadyForLobbySync())
+        {
+            return;
+        }
+
+        RoomState currentRoom = SharedStore.CurrentRoom;
+        string lobbyId = currentRoom != null && currentRoom.roomId != null ? currentRoom.roomId.Trim() : string.Empty;
+        if (string.IsNullOrWhiteSpace(lobbyId))
+        {
+            return;
+        }
+
+        isLobbyRefreshInProgress = true;
+        Lobby lobby = null;
+        try
+        {
+            lobby = await lobbyService.GetLobbyAsync(lobbyId);
+        }
+        finally
+        {
+            isLobbyRefreshInProgress = false;
+        }
+
+        if (lobby == null)
+        {
+            return;
+        }
+
+        RoomState mappedRoom = lobbyService.MapLobbyToRoomState(lobby, false);
+        if (!SharedStore.ApplyMappedCurrentRoom(mappedRoom, true))
+        {
+            return;
+        }
+
+        RefreshFromCurrentRoom();
+    }
+
+    private static bool IsAuthReadyForLobbySync()
+    {
+        AuthStateStore authStore = AuthStateStore.Local;
+        return authStore != null && authStore.IsAuthenticated;
+    }
+
+    private TMP_Text EnsurePlayersHintText()
+    {
+        if (playersHintText != null)
+        {
+            return playersHintText;
+        }
+
+        RectTransform rightPlayersArea = transform.Find("ContentArea/RightPlayersArea") as RectTransform;
+        if (rightPlayersArea == null)
+        {
+            return null;
+        }
+
+        RectTransform playersList = transform.Find("ContentArea/RightPlayersArea/PlayersList") as RectTransform;
+
+        GameObject hintObject = new GameObject("PlayersHintText", typeof(RectTransform), typeof(TextMeshProUGUI));
+        RectTransform hintRect = hintObject.GetComponent<RectTransform>();
+        hintRect.SetParent(rightPlayersArea, false);
+        hintRect.anchorMin = new Vector2(0.06f, 0.89f);
+        hintRect.anchorMax = new Vector2(0.94f, 0.98f);
+        hintRect.anchoredPosition = Vector2.zero;
+        hintRect.sizeDelta = Vector2.zero;
+
+        TMP_Text hintLabel = hintObject.GetComponent<TMP_Text>();
+        hintLabel.text = playersHintMessage;
+        hintLabel.alignment = TextAlignmentOptions.Left;
+        hintLabel.fontSize = 14f;
+        hintLabel.fontStyle = FontStyles.Italic;
+        hintLabel.color = new Color(0.8f, 0.9f, 0.99f, 0.9f);
+        hintLabel.enableWordWrapping = true;
+        hintLabel.overflowMode = TextOverflowModes.Ellipsis;
+        hintLabel.raycastTarget = false;
+        TMP_Text styleSource = GetPlayerNameText(0) ?? GetPlayerStateText(0);
+        if (styleSource != null)
+        {
+            if (styleSource.font != null)
+            {
+                hintLabel.font = styleSource.font;
+            }
+
+            if (styleSource.fontSharedMaterial != null)
+            {
+                hintLabel.fontSharedMaterial = styleSource.fontSharedMaterial;
+            }
+        }
+
+        if (playersList != null)
+        {
+            Vector2 anchorMin = playersList.anchorMin;
+            Vector2 anchorMax = playersList.anchorMax;
+            playersList.anchorMin = new Vector2(anchorMin.x, 0.01f);
+            playersList.anchorMax = new Vector2(anchorMax.x, 0.87f);
+            playersList.anchoredPosition = Vector2.zero;
+            playersList.sizeDelta = Vector2.zero;
+        }
+
+        playersHintText = hintLabel;
+        return playersHintText;
+    }
+
     private void AutoAssignReferences(bool includeInactive = true)
     {
         if (countdownText == null)
         {
             countdownText = transform.Find("HeaderArea/CountdownText")?.GetComponent<TMP_Text>();
+        }
+
+        if (playersHintText == null)
+        {
+            playersHintText = transform.Find("ContentArea/RightPlayersArea/PlayersHintText")?.GetComponent<TMP_Text>();
         }
 
         for (int i = 0; i < SlotCount; i++)
