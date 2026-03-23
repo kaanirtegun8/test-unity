@@ -80,6 +80,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
     private UnityLobbyService lobbyService;
     private bool isFallbackLobbyRefreshInProgress;
     private bool isLobbyEventsSubscriptionInProgress;
+    private bool isReadySyncInProgress;
     private bool hasHandledMissingLobby;
     private ILobbyEvents lobbyEventsSubscription;
     private LobbyEventCallbacks lobbyEventCallbacks;
@@ -404,7 +405,11 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             Lobby lobby = await lobbyService.GetLobbyAsync(lobbyId);
             if (lobby == null)
             {
-                HandleLobbyNotFound("not found");
+                if (lobbyService.LastGetLobbyWasNotFound)
+                {
+                    HandleLobbyNotFound("not found");
+                }
+
                 return;
             }
 
@@ -1011,9 +1016,9 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         OnPlayerSlotStatusClicked(0);
     }
 
-    private void OnPlayerSlotStatusClicked(int slotIndex)
+    private async void OnPlayerSlotStatusClicked(int slotIndex)
     {
-        if (slotIndex < 0)
+        if (slotIndex < 0 || isReadySyncInProgress)
         {
             return;
         }
@@ -1042,8 +1047,46 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             return;
         }
 
-        localPlayer.isReady = !localPlayer.isReady;
+        bool previousReadyState = localPlayer.isReady;
+        bool nextReadyState = !previousReadyState;
+        localPlayer.isReady = nextReadyState;
         ApplyCurrentRoomToUi();
+
+        string lobbyId = currentRoom.roomId != null ? currentRoom.roomId.Trim() : string.Empty;
+        if (!IsAuthReadyForLobbySync() || string.IsNullOrWhiteSpace(lobbyId))
+        {
+            return;
+        }
+
+        if (lobbyService == null)
+        {
+            lobbyService = new UnityLobbyService();
+        }
+
+        bool updateSucceeded = false;
+        isReadySyncInProgress = true;
+        try
+        {
+            string safeDisplayName = ResolveSlotDisplayName(localPlayer, true);
+            updateSucceeded = await lobbyService.UpdatePlayerReadyAsync(
+                lobbyId,
+                nextReadyState,
+                localPlayer.playerId,
+                safeDisplayName);
+        }
+        finally
+        {
+            isReadySyncInProgress = false;
+        }
+
+        if (!updateSucceeded)
+        {
+            localPlayer.isReady = previousReadyState;
+            ApplyCurrentRoomToUi();
+            return;
+        }
+
+        TryRefreshCurrentLobbyAsync();
     }
 
     private void OnCopyRoomIdButtonClicked()

@@ -13,6 +13,10 @@ public class UnityLobbyService
     private const string LobbyDataKeyTreasureCount = "treasureCount";
     private const string LobbyDataKeySelectedMapIndex = "selectedMapIndex";
     private const string LobbyDataKeyIsPrivate = "isPrivate";
+    private const string LobbyPlayerDataKeyDisplayName = "displayName";
+    private const string LobbyPlayerDataKeyIsReady = "isReady";
+
+    public bool LastGetLobbyWasNotFound { get; private set; }
 
     public async Task<Lobby> CreateLobbyAsync(
         string roomName,
@@ -124,6 +128,8 @@ public class UnityLobbyService
 
     public async Task<Lobby> GetLobbyAsync(string lobbyId)
     {
+        LastGetLobbyWasNotFound = false;
+
         if (!EnsureSignedIn())
         {
             return null;
@@ -141,11 +147,21 @@ public class UnityLobbyService
         }
         catch (LobbyServiceException exception)
         {
-            Debug.LogWarning($"UnityLobbyService.GetLobbyAsync failed: {exception.Reason} ({exception.ErrorCode}) {exception.Message}");
+            LastGetLobbyWasNotFound = IsNotFoundLobbyException(exception);
+            if (LastGetLobbyWasNotFound)
+            {
+                Debug.Log($"UnityLobbyService.GetLobbyAsync: lobby is not available anymore. {exception.Reason} ({exception.ErrorCode})");
+            }
+            else
+            {
+                Debug.LogWarning($"UnityLobbyService.GetLobbyAsync failed: {exception.Reason} ({exception.ErrorCode}) {exception.Message}");
+            }
+
             return null;
         }
         catch (Exception exception)
         {
+            LastGetLobbyWasNotFound = false;
             Debug.LogWarning($"UnityLobbyService.GetLobbyAsync unexpected error: {exception.Message}");
             return null;
         }
@@ -177,6 +193,66 @@ public class UnityLobbyService
         catch (Exception exception)
         {
             Debug.LogWarning($"UnityLobbyService.LeaveLobbyAsync unexpected error: {exception.Message}");
+            return false;
+        }
+    }
+
+    public async Task<bool> UpdatePlayerReadyAsync(
+        string lobbyId,
+        bool isReady,
+        string playerId = null,
+        string displayName = null)
+    {
+        if (!EnsureSignedIn())
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(lobbyId))
+        {
+            Debug.LogWarning("UnityLobbyService.UpdatePlayerReadyAsync skipped: lobbyId is empty.");
+            return false;
+        }
+
+        string safePlayerId = string.IsNullOrWhiteSpace(playerId)
+            ? AuthenticationService.Instance.PlayerId
+            : playerId.Trim();
+        if (string.IsNullOrWhiteSpace(safePlayerId))
+        {
+            Debug.LogWarning("UnityLobbyService.UpdatePlayerReadyAsync skipped: playerId is empty.");
+            return false;
+        }
+
+        Dictionary<string, PlayerDataObject> playerData = new Dictionary<string, PlayerDataObject>
+        {
+            { LobbyPlayerDataKeyIsReady, new PlayerDataObject(PlayerDataObject.VisibilityOptions.Member, isReady ? "1" : "0") }
+        };
+
+        if (!string.IsNullOrWhiteSpace(displayName))
+        {
+            playerData[LobbyPlayerDataKeyDisplayName] = new PlayerDataObject(
+                PlayerDataObject.VisibilityOptions.Member,
+                displayName.Trim());
+        }
+
+        UpdatePlayerOptions options = new UpdatePlayerOptions
+        {
+            Data = playerData
+        };
+
+        try
+        {
+            await LobbyService.Instance.UpdatePlayerAsync(lobbyId.Trim(), safePlayerId, options);
+            return true;
+        }
+        catch (LobbyServiceException exception)
+        {
+            Debug.LogWarning($"UnityLobbyService.UpdatePlayerReadyAsync failed: {exception.Reason} ({exception.ErrorCode}) {exception.Message}");
+            return false;
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning($"UnityLobbyService.UpdatePlayerReadyAsync unexpected error: {exception.Message}");
             return false;
         }
     }
@@ -259,6 +335,18 @@ public class UnityLobbyService
                message.IndexOf("already a member", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
+    private static bool IsNotFoundLobbyException(LobbyServiceException exception)
+    {
+        if (exception == null)
+        {
+            return false;
+        }
+
+        return exception.Reason == LobbyExceptionReason.LobbyNotFound ||
+               exception.Reason == LobbyExceptionReason.EntityNotFound ||
+               exception.Reason == LobbyExceptionReason.Gone;
+    }
+
     private static List<PlayerState> MapLobbyPlayers(Lobby lobby)
     {
         List<PlayerState> players = new List<PlayerState>();
@@ -276,16 +364,17 @@ public class UnityLobbyService
             }
 
             string safePlayerId = string.IsNullOrWhiteSpace(lobbyPlayer.Id) ? string.Empty : lobbyPlayer.Id.Trim();
-            string displayNameFromData = GetLobbyPlayerDataValueSafe(lobbyPlayer, "displayName");
+            string displayNameFromData = GetLobbyPlayerDataValueSafe(lobbyPlayer, LobbyPlayerDataKeyDisplayName);
             string safeDisplayName = !string.IsNullOrWhiteSpace(displayNameFromData)
                 ? displayNameFromData
                 : (!string.IsNullOrWhiteSpace(safePlayerId) ? safePlayerId : "Player");
+            bool isReady = ParseLobbyPlayerDataBoolSafe(lobbyPlayer, LobbyPlayerDataKeyIsReady, false);
 
             players.Add(new PlayerState
             {
                 playerId = safePlayerId,
                 displayName = safeDisplayName,
-                isReady = false,
+                isReady = isReady,
                 isHost = !string.IsNullOrWhiteSpace(lobby.HostId) &&
                          string.Equals(lobby.HostId, safePlayerId, StringComparison.Ordinal),
                 selectedColorIndex = 0
@@ -334,6 +423,33 @@ public class UnityLobbyService
         }
 
         return dataObject.Value ?? string.Empty;
+    }
+
+    private static bool ParseLobbyPlayerDataBoolSafe(Player player, string key, bool fallback)
+    {
+        string value = GetLobbyPlayerDataValueSafe(player, key);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return fallback;
+        }
+
+        string normalized = value.Trim();
+        if (string.Equals(normalized, "1", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (string.Equals(normalized, "0", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (bool.TryParse(normalized, out bool parsed))
+        {
+            return parsed;
+        }
+
+        return fallback;
     }
 
     private static bool EnsureSignedIn()
