@@ -69,9 +69,11 @@ public class CurrentRoomScreenBinder : MonoBehaviour
     [SerializeField] private float fallbackLobbyRefreshIntervalSeconds = 2.5f;
     [SerializeField] private LobbyMockScreenSwitcher screenSwitcher;
     [SerializeField] private RoomBrowserScreenBinder roomBrowserScreenBinder;
+    [SerializeField] private MiniGameReadyScreenBinder miniGameReadyScreenBinder;
     [SerializeField] private GameObject roomBrowserScreen;
     [SerializeField] private GameObject createRoomScreen;
     [SerializeField] private GameObject currentRoomScreen;
+    [SerializeField] private GameObject miniGameReadyScreen;
 
     private GameObject copyTooltipObject;
     private TMP_Text copyTooltipText;
@@ -656,7 +658,9 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             return;
         }
 
-        string localPlayerId = SharedStore.LocalPlayer != null ? SharedStore.LocalPlayer.playerId : string.Empty;
+        string localPlayerId = SharedStore.LocalPlayer != null && SharedStore.LocalPlayer.playerId != null
+            ? SharedStore.LocalPlayer.playerId.Trim()
+            : string.Empty;
         PlayerState localPlayer = FindLocalPlayer(currentRoom, localPlayerId);
         int safeMaxPlayers = Mathf.Clamp(maxPlayers, 0, playerSlots.Length);
         List<PlayerState> slotPlayers = GetOrderedPlayersForSlots(currentRoom, safeMaxPlayers);
@@ -999,6 +1003,12 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             copyRoomIdButton.onClick.RemoveListener(OnCopyRoomIdButtonClicked);
             copyRoomIdButton.onClick.AddListener(OnCopyRoomIdButtonClicked);
         }
+
+        if (startGameButton != null)
+        {
+            startGameButton.onClick.RemoveListener(OnStartGameButtonClicked);
+            startGameButton.onClick.AddListener(OnStartGameButtonClicked);
+        }
     }
 
     private void UnbindUiEvents()
@@ -1008,6 +1018,81 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         if (copyRoomIdButton != null)
         {
             copyRoomIdButton.onClick.RemoveListener(OnCopyRoomIdButtonClicked);
+        }
+
+        if (startGameButton != null)
+        {
+            startGameButton.onClick.RemoveListener(OnStartGameButtonClicked);
+        }
+    }
+
+    private void OnStartGameButtonClicked()
+    {
+        RoomState currentRoom = SharedStore.CurrentRoom;
+        if (currentRoom == null || !startGameButton.interactable)
+        {
+            return;
+        }
+
+        string localPlayerId = SharedStore.LocalPlayer != null ? SharedStore.LocalPlayer.playerId : string.Empty;
+        if (string.IsNullOrWhiteSpace(localPlayerId) || currentRoom.players == null)
+        {
+            return;
+        }
+
+        PlayerState localPlayer = null;
+        for (int i = 0; i < currentRoom.players.Count; i++)
+        {
+            PlayerState candidate = currentRoom.players[i];
+            string candidateId = candidate != null && candidate.playerId != null ? candidate.playerId.Trim() : string.Empty;
+            if (!string.IsNullOrWhiteSpace(candidateId) &&
+                string.Equals(candidateId, localPlayerId, StringComparison.Ordinal))
+            {
+                localPlayer = candidate;
+                break;
+            }
+        }
+
+        if (localPlayer == null || !localPlayer.isHost)
+        {
+            return;
+        }
+
+        OpenMiniGameReadyScreen();
+    }
+
+    private void OpenMiniGameReadyScreen()
+    {
+        AutoAssignReferences();
+
+        if (roomBrowserScreen != null)
+        {
+            roomBrowserScreen.SetActive(false);
+        }
+
+        if (createRoomScreen != null)
+        {
+            createRoomScreen.SetActive(false);
+        }
+
+        if (currentRoomScreen != null)
+        {
+            currentRoomScreen.SetActive(false);
+        }
+
+        if (miniGameReadyScreen != null)
+        {
+            miniGameReadyScreen.SetActive(true);
+        }
+
+        if (miniGameReadyScreenBinder == null && miniGameReadyScreen != null)
+        {
+            miniGameReadyScreenBinder = miniGameReadyScreen.GetComponent<MiniGameReadyScreenBinder>();
+        }
+
+        if (miniGameReadyScreenBinder != null)
+        {
+            miniGameReadyScreenBinder.RefreshFromCurrentRoom();
         }
     }
 
@@ -1231,6 +1316,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
     private void AutoAssignReferences(bool allowCreateGeneratedUi = true)
     {
         Transform[] allTransforms = transform.GetComponentsInChildren<Transform>(true);
+        Transform[] allRootTransforms = transform.root.GetComponentsInChildren<Transform>(true);
 
         if (playerSlots == null || playerSlots.Length != DefaultSlotCount)
         {
@@ -1294,22 +1380,32 @@ public class CurrentRoomScreenBinder : MonoBehaviour
 
         if (roomBrowserScreen == null)
         {
-            roomBrowserScreen = FindGameObjectByName(allTransforms, "RoomBrowserScreen");
+            roomBrowserScreen = FindGameObjectByName(allRootTransforms, "RoomBrowserScreen");
         }
 
         if (createRoomScreen == null)
         {
-            createRoomScreen = FindGameObjectByName(allTransforms, "CreateRoomScreen");
+            createRoomScreen = FindGameObjectByName(allRootTransforms, "CreateRoomScreen");
         }
 
         if (currentRoomScreen == null)
         {
-            currentRoomScreen = FindGameObjectByName(allTransforms, "CurrentRoomScreen");
+            currentRoomScreen = FindGameObjectByName(allRootTransforms, "CurrentRoomScreen");
+        }
+
+        if (miniGameReadyScreen == null)
+        {
+            miniGameReadyScreen = FindGameObjectByName(allRootTransforms, "MiniGameReadyScreen");
         }
 
         if (roomBrowserScreenBinder == null && roomBrowserScreen != null)
         {
             roomBrowserScreenBinder = roomBrowserScreen.GetComponentInChildren<RoomBrowserScreenBinder>(true);
+        }
+
+        if (miniGameReadyScreenBinder == null && miniGameReadyScreen != null)
+        {
+            miniGameReadyScreenBinder = miniGameReadyScreen.GetComponent<MiniGameReadyScreenBinder>();
         }
 
         AssignSlotByName(allTransforms, "PlayerSlot01", 0);
