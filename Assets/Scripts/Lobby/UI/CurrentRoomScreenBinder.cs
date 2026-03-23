@@ -83,6 +83,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
     private bool isFallbackLobbyRefreshInProgress;
     private bool isLobbyEventsSubscriptionInProgress;
     private bool isReadySyncInProgress;
+    private bool isStartGamePhaseUpdateInProgress;
     private bool hasHandledMissingLobby;
     private ILobbyEvents lobbyEventsSubscription;
     private LobbyEventCallbacks lobbyEventCallbacks;
@@ -571,9 +572,10 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             sideRewardText.text = $"x{safeTreasureCount}";
         }
 
-        ApplyStartGameButtonState(safePlayerCount);
+        ApplyStartGameButtonState(currentRoom, safePlayerCount);
         ApplyPlayerSlotsVisuals(currentRoom, clampedPlayerCount, safeMaxPlayers);
         ApplySideMapPreviewVisual(currentRoom.selectedMapIndex);
+        TryOpenMiniGameReadyIfNeeded(currentRoom);
     }
 
     private void ApplyFallbackUi()
@@ -603,19 +605,27 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             sideRewardText.text = "x0";
         }
 
-        ApplyStartGameButtonState(0);
+        ApplyStartGameButtonState(null, 0);
         ApplyPlayerSlotsVisuals(null, 0, DefaultSlotCount);
         ApplySideMapPreviewVisual(0);
     }
 
-    private void ApplyStartGameButtonState(int playerCount)
+    private void ApplyStartGameButtonState(RoomState currentRoom, int playerCount)
     {
         if (startGameButton == null)
         {
             return;
         }
 
-        bool canStart = playerCount >= 2;
+        bool isLocalHost = IsLocalPlayerHost(currentRoom);
+        startGameButton.gameObject.SetActive(isLocalHost);
+        if (!isLocalHost)
+        {
+            startGameButton.interactable = false;
+            return;
+        }
+
+        bool canStart = playerCount >= 2 && !IsMiniGameReadyPhase(currentRoom);
         startGameButton.interactable = canStart;
 
         if (startGameButtonImage == null)
@@ -649,6 +659,60 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         {
             startGameButtonText.color = canStart ? startGameEnabledTextColor : startGameDisabledTextColor;
         }
+    }
+
+    private bool IsLocalPlayerHost(RoomState currentRoom)
+    {
+        if (currentRoom == null || currentRoom.players == null || SharedStore.LocalPlayer == null)
+        {
+            return false;
+        }
+
+        string localPlayerId = SharedStore.LocalPlayer.playerId != null
+            ? SharedStore.LocalPlayer.playerId.Trim()
+            : string.Empty;
+        if (string.IsNullOrWhiteSpace(localPlayerId))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < currentRoom.players.Count; i++)
+        {
+            PlayerState player = currentRoom.players[i];
+            string playerId = player != null && player.playerId != null ? player.playerId.Trim() : string.Empty;
+            if (!string.IsNullOrWhiteSpace(playerId) &&
+                string.Equals(playerId, localPlayerId, StringComparison.Ordinal))
+            {
+                return player != null && player.isHost;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsMiniGameReadyPhase(RoomState room)
+    {
+        if (room == null || string.IsNullOrWhiteSpace(room.currentPhase))
+        {
+            return false;
+        }
+
+        return string.Equals(room.currentPhase.Trim(), RoomState.PhaseMiniGameReady, StringComparison.Ordinal);
+    }
+
+    private void TryOpenMiniGameReadyIfNeeded(RoomState currentRoom)
+    {
+        if (!isActiveAndEnabled || !IsMiniGameReadyPhase(currentRoom))
+        {
+            return;
+        }
+
+        if (miniGameReadyScreen != null && miniGameReadyScreen.activeSelf)
+        {
+            return;
+        }
+
+        OpenMiniGameReadyScreen();
     }
 
     private void ApplyPlayerSlotsVisuals(RoomState currentRoom, int playerCount, int maxPlayers)
@@ -1026,8 +1090,13 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         }
     }
 
-    private void OnStartGameButtonClicked()
+    private async void OnStartGameButtonClicked()
     {
+        if (isStartGamePhaseUpdateInProgress)
+        {
+            return;
+        }
+
         RoomState currentRoom = SharedStore.CurrentRoom;
         if (currentRoom == null || !startGameButton.interactable)
         {
@@ -1058,12 +1127,53 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             return;
         }
 
+        string lobbyId = currentRoom.roomId != null ? currentRoom.roomId.Trim() : string.Empty;
+        if (!IsAuthReadyForLobbySync() || string.IsNullOrWhiteSpace(lobbyId))
+        {
+            return;
+        }
+
+        if (IsMiniGameReadyPhase(currentRoom))
+        {
+            OpenMiniGameReadyScreen();
+            return;
+        }
+
+        if (lobbyService == null)
+        {
+            lobbyService = new UnityLobbyService();
+        }
+
+        isStartGamePhaseUpdateInProgress = true;
+        bool phaseUpdated = false;
+        try
+        {
+            phaseUpdated = await lobbyService.UpdateLobbyPhaseAsync(lobbyId, RoomState.PhaseMiniGameReady);
+        }
+        finally
+        {
+            isStartGamePhaseUpdateInProgress = false;
+        }
+
+        if (!phaseUpdated)
+        {
+            Debug.LogWarning("CurrentRoomScreenBinder: Start Game phase update failed safely.");
+            return;
+        }
+
+        currentRoom.currentPhase = RoomState.PhaseMiniGameReady;
+        SharedStore.ApplyMappedCurrentRoom(currentRoom, true);
         OpenMiniGameReadyScreen();
     }
 
     private void OpenMiniGameReadyScreen()
     {
         AutoAssignReferences();
+
+        if (miniGameReadyScreen != null && miniGameReadyScreen.activeSelf)
+        {
+            return;
+        }
 
         if (roomBrowserScreen != null)
         {
