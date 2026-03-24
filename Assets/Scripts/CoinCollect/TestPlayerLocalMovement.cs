@@ -9,27 +9,46 @@ public class TestPlayerLocalMovement : MonoBehaviour
     [SerializeField] private float arenaMinZ = -9.5f;
     [SerializeField] private float arenaMaxZ = 9.5f;
 
+    private Rigidbody playerBody;
+    private Vector3 movementInput;
     private float fixedY;
 
     private void Awake()
     {
         fixedY = transform.position.y;
+        playerBody = GetComponent<Rigidbody>();
+        if (playerBody == null)
+        {
+            playerBody = gameObject.AddComponent<Rigidbody>();
+        }
+
+        playerBody.useGravity = false;
+        playerBody.isKinematic = true;
+        playerBody.constraints = RigidbodyConstraints.FreezeRotation | RigidbodyConstraints.FreezePositionY;
     }
 
     private void Update()
     {
-        Vector3 input = new Vector3(Input.GetAxisRaw("Horizontal"), 0f, Input.GetAxisRaw("Vertical"));
-        if (input.sqrMagnitude > 1f)
+        movementInput = new Vector3(Input.GetAxisRaw("Horizontal"), 0f, Input.GetAxisRaw("Vertical"));
+        if (movementInput.sqrMagnitude > 1f)
         {
-            input.Normalize();
+            movementInput.Normalize();
+        }
+    }
+
+    private void FixedUpdate()
+    {
+        if (playerBody == null)
+        {
+            return;
         }
 
-        Vector3 nextPosition = transform.position + (input * moveSpeed * Time.deltaTime);
+        Vector3 nextPosition = playerBody.position + (movementInput * moveSpeed * Time.fixedDeltaTime);
         nextPosition.x = Mathf.Clamp(nextPosition.x, arenaMinX, arenaMaxX);
         nextPosition.y = fixedY;
         nextPosition.z = Mathf.Clamp(nextPosition.z, arenaMinZ, arenaMaxZ);
 
-        transform.position = nextPosition;
+        playerBody.MovePosition(nextPosition);
     }
 
 #if UNITY_EDITOR
