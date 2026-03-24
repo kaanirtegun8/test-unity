@@ -69,9 +69,11 @@ public class CurrentRoomScreenBinder : MonoBehaviour
     [SerializeField] private float fallbackLobbyRefreshIntervalSeconds = 2.5f;
     [SerializeField] private LobbyMockScreenSwitcher screenSwitcher;
     [SerializeField] private RoomBrowserScreenBinder roomBrowserScreenBinder;
+    [SerializeField] private MiniGameReadyScreenBinder miniGameReadyScreenBinder;
     [SerializeField] private GameObject roomBrowserScreen;
     [SerializeField] private GameObject createRoomScreen;
     [SerializeField] private GameObject currentRoomScreen;
+    [SerializeField] private GameObject miniGameReadyScreen;
 
     private GameObject copyTooltipObject;
     private TMP_Text copyTooltipText;
@@ -81,6 +83,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
     private bool isFallbackLobbyRefreshInProgress;
     private bool isLobbyEventsSubscriptionInProgress;
     private bool isReadySyncInProgress;
+    private bool isStartGamePhaseUpdateInProgress;
     private bool hasHandledMissingLobby;
     private ILobbyEvents lobbyEventsSubscription;
     private LobbyEventCallbacks lobbyEventCallbacks;
@@ -569,9 +572,10 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             sideRewardText.text = $"x{safeTreasureCount}";
         }
 
-        ApplyStartGameButtonState(safePlayerCount);
+        ApplyStartGameButtonState(currentRoom, safePlayerCount);
         ApplyPlayerSlotsVisuals(currentRoom, clampedPlayerCount, safeMaxPlayers);
         ApplySideMapPreviewVisual(currentRoom.selectedMapIndex);
+        TryOpenMiniGameReadyIfNeeded(currentRoom);
     }
 
     private void ApplyFallbackUi()
@@ -601,19 +605,27 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             sideRewardText.text = "x0";
         }
 
-        ApplyStartGameButtonState(0);
+        ApplyStartGameButtonState(null, 0);
         ApplyPlayerSlotsVisuals(null, 0, DefaultSlotCount);
         ApplySideMapPreviewVisual(0);
     }
 
-    private void ApplyStartGameButtonState(int playerCount)
+    private void ApplyStartGameButtonState(RoomState currentRoom, int playerCount)
     {
         if (startGameButton == null)
         {
             return;
         }
 
-        bool canStart = playerCount >= 2;
+        bool isLocalHost = IsLocalPlayerHost(currentRoom);
+        startGameButton.gameObject.SetActive(isLocalHost);
+        if (!isLocalHost)
+        {
+            startGameButton.interactable = false;
+            return;
+        }
+
+        bool canStart = playerCount >= 2 && !IsMiniGameReadyPhase(currentRoom);
         startGameButton.interactable = canStart;
 
         if (startGameButtonImage == null)
@@ -649,6 +661,60 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         }
     }
 
+    private bool IsLocalPlayerHost(RoomState currentRoom)
+    {
+        if (currentRoom == null || currentRoom.players == null || SharedStore.LocalPlayer == null)
+        {
+            return false;
+        }
+
+        string localPlayerId = SharedStore.LocalPlayer.playerId != null
+            ? SharedStore.LocalPlayer.playerId.Trim()
+            : string.Empty;
+        if (string.IsNullOrWhiteSpace(localPlayerId))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < currentRoom.players.Count; i++)
+        {
+            PlayerState player = currentRoom.players[i];
+            string playerId = player != null && player.playerId != null ? player.playerId.Trim() : string.Empty;
+            if (!string.IsNullOrWhiteSpace(playerId) &&
+                string.Equals(playerId, localPlayerId, StringComparison.Ordinal))
+            {
+                return player != null && player.isHost;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsMiniGameReadyPhase(RoomState room)
+    {
+        if (room == null || string.IsNullOrWhiteSpace(room.currentPhase))
+        {
+            return false;
+        }
+
+        return string.Equals(room.currentPhase.Trim(), RoomState.PhaseMiniGameReady, StringComparison.Ordinal);
+    }
+
+    private void TryOpenMiniGameReadyIfNeeded(RoomState currentRoom)
+    {
+        if (!isActiveAndEnabled || !IsMiniGameReadyPhase(currentRoom))
+        {
+            return;
+        }
+
+        if (miniGameReadyScreen != null && miniGameReadyScreen.activeSelf)
+        {
+            return;
+        }
+
+        OpenMiniGameReadyScreen();
+    }
+
     private void ApplyPlayerSlotsVisuals(RoomState currentRoom, int playerCount, int maxPlayers)
     {
         if (playerSlots == null || playerSlots.Length == 0)
@@ -656,7 +722,9 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             return;
         }
 
-        string localPlayerId = SharedStore.LocalPlayer != null ? SharedStore.LocalPlayer.playerId : string.Empty;
+        string localPlayerId = SharedStore.LocalPlayer != null && SharedStore.LocalPlayer.playerId != null
+            ? SharedStore.LocalPlayer.playerId.Trim()
+            : string.Empty;
         PlayerState localPlayer = FindLocalPlayer(currentRoom, localPlayerId);
         int safeMaxPlayers = Mathf.Clamp(maxPlayers, 0, playerSlots.Length);
         List<PlayerState> slotPlayers = GetOrderedPlayersForSlots(currentRoom, safeMaxPlayers);
@@ -999,6 +1067,12 @@ public class CurrentRoomScreenBinder : MonoBehaviour
             copyRoomIdButton.onClick.RemoveListener(OnCopyRoomIdButtonClicked);
             copyRoomIdButton.onClick.AddListener(OnCopyRoomIdButtonClicked);
         }
+
+        if (startGameButton != null)
+        {
+            startGameButton.onClick.RemoveListener(OnStartGameButtonClicked);
+            startGameButton.onClick.AddListener(OnStartGameButtonClicked);
+        }
     }
 
     private void UnbindUiEvents()
@@ -1008,6 +1082,127 @@ public class CurrentRoomScreenBinder : MonoBehaviour
         if (copyRoomIdButton != null)
         {
             copyRoomIdButton.onClick.RemoveListener(OnCopyRoomIdButtonClicked);
+        }
+
+        if (startGameButton != null)
+        {
+            startGameButton.onClick.RemoveListener(OnStartGameButtonClicked);
+        }
+    }
+
+    private async void OnStartGameButtonClicked()
+    {
+        if (isStartGamePhaseUpdateInProgress)
+        {
+            return;
+        }
+
+        RoomState currentRoom = SharedStore.CurrentRoom;
+        if (currentRoom == null || !startGameButton.interactable)
+        {
+            return;
+        }
+
+        string localPlayerId = SharedStore.LocalPlayer != null ? SharedStore.LocalPlayer.playerId : string.Empty;
+        if (string.IsNullOrWhiteSpace(localPlayerId) || currentRoom.players == null)
+        {
+            return;
+        }
+
+        PlayerState localPlayer = null;
+        for (int i = 0; i < currentRoom.players.Count; i++)
+        {
+            PlayerState candidate = currentRoom.players[i];
+            string candidateId = candidate != null && candidate.playerId != null ? candidate.playerId.Trim() : string.Empty;
+            if (!string.IsNullOrWhiteSpace(candidateId) &&
+                string.Equals(candidateId, localPlayerId, StringComparison.Ordinal))
+            {
+                localPlayer = candidate;
+                break;
+            }
+        }
+
+        if (localPlayer == null || !localPlayer.isHost)
+        {
+            return;
+        }
+
+        string lobbyId = currentRoom.roomId != null ? currentRoom.roomId.Trim() : string.Empty;
+        if (!IsAuthReadyForLobbySync() || string.IsNullOrWhiteSpace(lobbyId))
+        {
+            return;
+        }
+
+        if (IsMiniGameReadyPhase(currentRoom))
+        {
+            OpenMiniGameReadyScreen();
+            return;
+        }
+
+        if (lobbyService == null)
+        {
+            lobbyService = new UnityLobbyService();
+        }
+
+        isStartGamePhaseUpdateInProgress = true;
+        bool phaseUpdated = false;
+        try
+        {
+            phaseUpdated = await lobbyService.UpdateLobbyPhaseAsync(lobbyId, RoomState.PhaseMiniGameReady);
+        }
+        finally
+        {
+            isStartGamePhaseUpdateInProgress = false;
+        }
+
+        if (!phaseUpdated)
+        {
+            Debug.LogWarning("CurrentRoomScreenBinder: Start Game phase update failed safely.");
+            return;
+        }
+
+        currentRoom.currentPhase = RoomState.PhaseMiniGameReady;
+        SharedStore.ApplyMappedCurrentRoom(currentRoom, true);
+        OpenMiniGameReadyScreen();
+    }
+
+    private void OpenMiniGameReadyScreen()
+    {
+        AutoAssignReferences();
+
+        if (miniGameReadyScreen != null && miniGameReadyScreen.activeSelf)
+        {
+            return;
+        }
+
+        if (roomBrowserScreen != null)
+        {
+            roomBrowserScreen.SetActive(false);
+        }
+
+        if (createRoomScreen != null)
+        {
+            createRoomScreen.SetActive(false);
+        }
+
+        if (currentRoomScreen != null)
+        {
+            currentRoomScreen.SetActive(false);
+        }
+
+        if (miniGameReadyScreen != null)
+        {
+            miniGameReadyScreen.SetActive(true);
+        }
+
+        if (miniGameReadyScreenBinder == null && miniGameReadyScreen != null)
+        {
+            miniGameReadyScreenBinder = miniGameReadyScreen.GetComponent<MiniGameReadyScreenBinder>();
+        }
+
+        if (miniGameReadyScreenBinder != null)
+        {
+            miniGameReadyScreenBinder.RefreshFromCurrentRoom();
         }
     }
 
@@ -1231,6 +1426,7 @@ public class CurrentRoomScreenBinder : MonoBehaviour
     private void AutoAssignReferences(bool allowCreateGeneratedUi = true)
     {
         Transform[] allTransforms = transform.GetComponentsInChildren<Transform>(true);
+        Transform[] allRootTransforms = transform.root.GetComponentsInChildren<Transform>(true);
 
         if (playerSlots == null || playerSlots.Length != DefaultSlotCount)
         {
@@ -1294,22 +1490,32 @@ public class CurrentRoomScreenBinder : MonoBehaviour
 
         if (roomBrowserScreen == null)
         {
-            roomBrowserScreen = FindGameObjectByName(allTransforms, "RoomBrowserScreen");
+            roomBrowserScreen = FindGameObjectByName(allRootTransforms, "RoomBrowserScreen");
         }
 
         if (createRoomScreen == null)
         {
-            createRoomScreen = FindGameObjectByName(allTransforms, "CreateRoomScreen");
+            createRoomScreen = FindGameObjectByName(allRootTransforms, "CreateRoomScreen");
         }
 
         if (currentRoomScreen == null)
         {
-            currentRoomScreen = FindGameObjectByName(allTransforms, "CurrentRoomScreen");
+            currentRoomScreen = FindGameObjectByName(allRootTransforms, "CurrentRoomScreen");
+        }
+
+        if (miniGameReadyScreen == null)
+        {
+            miniGameReadyScreen = FindGameObjectByName(allRootTransforms, "MiniGameReadyScreen");
         }
 
         if (roomBrowserScreenBinder == null && roomBrowserScreen != null)
         {
             roomBrowserScreenBinder = roomBrowserScreen.GetComponentInChildren<RoomBrowserScreenBinder>(true);
+        }
+
+        if (miniGameReadyScreenBinder == null && miniGameReadyScreen != null)
+        {
+            miniGameReadyScreenBinder = miniGameReadyScreen.GetComponent<MiniGameReadyScreenBinder>();
         }
 
         AssignSlotByName(allTransforms, "PlayerSlot01", 0);

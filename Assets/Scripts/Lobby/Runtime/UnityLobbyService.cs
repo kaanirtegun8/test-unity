@@ -13,8 +13,10 @@ public class UnityLobbyService
     private const string LobbyDataKeyTreasureCount = "treasureCount";
     private const string LobbyDataKeySelectedMapIndex = "selectedMapIndex";
     private const string LobbyDataKeyIsPrivate = "isPrivate";
+    private const string LobbyDataKeyCurrentPhase = "currentPhase";
     private const string LobbyPlayerDataKeyDisplayName = "displayName";
     private const string LobbyPlayerDataKeyIsReady = "isReady";
+    private const string LobbyPlayerDataKeyIsConfirmed = "isConfirmed";
 
     public bool LastGetLobbyWasNotFound { get; private set; }
 
@@ -43,7 +45,8 @@ public class UnityLobbyService
                 { LobbyDataKeyRoomName, new DataObject(DataObject.VisibilityOptions.Public, safeRoomName) },
                 { LobbyDataKeyTreasureCount, new DataObject(DataObject.VisibilityOptions.Public, safeTreasureCount.ToString()) },
                 { LobbyDataKeySelectedMapIndex, new DataObject(DataObject.VisibilityOptions.Public, safeSelectedMapIndex.ToString()) },
-                { LobbyDataKeyIsPrivate, new DataObject(DataObject.VisibilityOptions.Public, isPrivate ? "1" : "0") }
+                { LobbyDataKeyIsPrivate, new DataObject(DataObject.VisibilityOptions.Public, isPrivate ? "1" : "0") },
+                { LobbyDataKeyCurrentPhase, new DataObject(DataObject.VisibilityOptions.Public, RoomState.PhaseCurrentRoom) }
             }
         };
 
@@ -257,6 +260,107 @@ public class UnityLobbyService
         }
     }
 
+    public async Task<bool> UpdatePlayerLockInAsync(
+        string lobbyId,
+        bool isConfirmed,
+        string playerId = null,
+        string displayName = null)
+    {
+        if (!EnsureSignedIn())
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(lobbyId))
+        {
+            Debug.LogWarning("UnityLobbyService.UpdatePlayerLockInAsync skipped: lobbyId is empty.");
+            return false;
+        }
+
+        string safePlayerId = string.IsNullOrWhiteSpace(playerId)
+            ? AuthenticationService.Instance.PlayerId
+            : playerId.Trim();
+        if (string.IsNullOrWhiteSpace(safePlayerId))
+        {
+            Debug.LogWarning("UnityLobbyService.UpdatePlayerLockInAsync skipped: playerId is empty.");
+            return false;
+        }
+
+        Dictionary<string, PlayerDataObject> playerData = new Dictionary<string, PlayerDataObject>
+        {
+            { LobbyPlayerDataKeyIsConfirmed, new PlayerDataObject(PlayerDataObject.VisibilityOptions.Member, isConfirmed ? "1" : "0") }
+        };
+
+        if (!string.IsNullOrWhiteSpace(displayName))
+        {
+            playerData[LobbyPlayerDataKeyDisplayName] = new PlayerDataObject(
+                PlayerDataObject.VisibilityOptions.Member,
+                displayName.Trim());
+        }
+
+        UpdatePlayerOptions options = new UpdatePlayerOptions
+        {
+            Data = playerData
+        };
+
+        try
+        {
+            await LobbyService.Instance.UpdatePlayerAsync(lobbyId.Trim(), safePlayerId, options);
+            return true;
+        }
+        catch (LobbyServiceException exception)
+        {
+            Debug.LogWarning($"UnityLobbyService.UpdatePlayerLockInAsync failed: {exception.Reason} ({exception.ErrorCode}) {exception.Message}");
+            return false;
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning($"UnityLobbyService.UpdatePlayerLockInAsync unexpected error: {exception.Message}");
+            return false;
+        }
+    }
+
+    public async Task<bool> UpdateLobbyPhaseAsync(string lobbyId, string phase)
+    {
+        if (!EnsureSignedIn())
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(lobbyId))
+        {
+            Debug.LogWarning("UnityLobbyService.UpdateLobbyPhaseAsync skipped: lobbyId is empty.");
+            return false;
+        }
+
+        string safePhase = string.IsNullOrWhiteSpace(phase)
+            ? RoomState.PhaseCurrentRoom
+            : phase.Trim();
+        UpdateLobbyOptions options = new UpdateLobbyOptions
+        {
+            Data = new Dictionary<string, DataObject>
+            {
+                { LobbyDataKeyCurrentPhase, new DataObject(DataObject.VisibilityOptions.Public, safePhase) }
+            }
+        };
+
+        try
+        {
+            await LobbyService.Instance.UpdateLobbyAsync(lobbyId.Trim(), options);
+            return true;
+        }
+        catch (LobbyServiceException exception)
+        {
+            Debug.LogWarning($"UnityLobbyService.UpdateLobbyPhaseAsync failed: {exception.Reason} ({exception.ErrorCode}) {exception.Message}");
+            return false;
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning($"UnityLobbyService.UpdateLobbyPhaseAsync unexpected error: {exception.Message}");
+            return false;
+        }
+    }
+
     public async Task<bool> DeleteLobbyAsync(string lobbyId)
     {
         if (!EnsureSignedIn())
@@ -309,6 +413,7 @@ public class UnityLobbyService
         string safeRoomName = !string.IsNullOrWhiteSpace(lobby.Name) ? lobby.Name : roomNameFromData;
         int treasureCount = ParseLobbyDataIntSafe(lobby, LobbyDataKeyTreasureCount, 0);
         int selectedMapIndex = ParseLobbyDataIntSafe(lobby, LobbyDataKeySelectedMapIndex, 0);
+        string currentPhase = GetLobbyDataValueSafe(lobby, LobbyDataKeyCurrentPhase);
         string safeRoomId = !string.IsNullOrWhiteSpace(lobby.Id) ? lobby.Id : lobby.LobbyCode;
 
         return new RoomState
@@ -319,6 +424,7 @@ public class UnityLobbyService
             maxPlayers = safeMaxPlayers,
             selectedMapIndex = Math.Max(0, selectedMapIndex),
             treasureCount = Math.Max(0, treasureCount),
+            currentPhase = string.IsNullOrWhiteSpace(currentPhase) ? RoomState.PhaseCurrentRoom : currentPhase.Trim(),
             players = players
         };
     }
@@ -369,12 +475,14 @@ public class UnityLobbyService
                 ? displayNameFromData
                 : (!string.IsNullOrWhiteSpace(safePlayerId) ? safePlayerId : "Player");
             bool isReady = ParseLobbyPlayerDataBoolSafe(lobbyPlayer, LobbyPlayerDataKeyIsReady, false);
+            bool isConfirmed = ParseLobbyPlayerDataBoolSafe(lobbyPlayer, LobbyPlayerDataKeyIsConfirmed, false);
 
             players.Add(new PlayerState
             {
                 playerId = safePlayerId,
                 displayName = safeDisplayName,
                 isReady = isReady,
+                isConfirmed = isConfirmed,
                 isHost = !string.IsNullOrWhiteSpace(lobby.HostId) &&
                          string.Equals(lobby.HostId, safePlayerId, StringComparison.Ordinal),
                 selectedColorIndex = 0
